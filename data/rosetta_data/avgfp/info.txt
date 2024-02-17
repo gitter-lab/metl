@@ -1,0 +1,15 @@
+dataset created by querying database
+time,2024-02-17_12-21-52
+db_fn,data/rosetta_data/avgfp_rosettafy_sample.db
+condor_runs_in_db,[]
+num_variants_in_db,10000
+query,"SELECT * FROM variant WHERE `pdb_fn` == "1gfl_cm.pdb""
+pdb_fns,1gfl_cm.pdb
+condor_runs_in_query_results,[]
+num_variants_from_query,10000
+filtered,nans
+num_variants_after_nan_filter,10000
+filtered,duplicates (choose random duplicate to keep)
+num_variants_after_duplicate_filter,9999
+filtered,outliers (total_score > 6.5)
+num_variants_after_outlier_removal,9912
