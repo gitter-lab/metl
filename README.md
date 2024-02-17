@@ -19,15 +19,27 @@ conda activate metl
 
 For GPU support, make sure you have the appropriate CUDA version installed.
 
-# Rosetta data
-
-
-
-# Experimental data
-
-
 
 # Pretraining on Rosetta data
 
+Rosetta pretraining data is stored in the [rosetta_data](data/rosetta_data) directory.
+This repository contains a sample Rosetta dataset for [avGFP](data/rosetta_data/avgfp), which can be used to pretrain a toy avGFP METL-Local model.
+For more information on how to acquire or create a Rosetta dataset, see the README in the [rosetta_data](data/rosetta_data) directory.
+
+Once you've downloaded or created a Rosetta pretraining dataset, you can pretrain a METL model using...
 
 # Finetuning on experimental data
+
+Experimental data is stored in [dms_data](data/dms_data) directory. 
+For demonstration purposes, this repository contains the avGFP experimental dataset from [Sarkisyan et al. (2016)](https://doi.org/10.1038/nature17995). 
+See the [metl-pub](url) repository to access the other experimental datasets we used in our preprint.
+See the README in the [dms_data](data/dms_data) directory for information about how to use your own experimental dataset. 
+
+In addition to experimental data, you will need a pretrained METL model to finetune.
+You can pretrain METL models yourself using this repository, or you can use our pretrained METL models from the [metl-pretrained](url) repository. 
+
+Once you have a pretrained METL model and an experimental dataset, you can finetune the model using...
+
+# Additional information
+
+Training baseline models, etc.
