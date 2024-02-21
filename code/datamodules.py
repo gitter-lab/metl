@@ -1,0 +1,927 @@
+""" PyTorch Lightning datamodules for DMS and Rosetta datasets """
+
+import warnings
+from argparse import ArgumentParser
+from os.path import dirname, join
+from typing import Optional, Union
+
+import numpy as np
+import pandas as pd
+
+import torch
+import torch.nn
+import torch.nn.functional as F
+import torch.utils.data as data_utils
+from torch.utils.data import DataLoader
+import pytorch_lightning as pl
+
+import datasets
+import pdb_sampler
+import utils
+import constants
+import split_dataset as sd
+import encode as enc
+from datasets import RosettaDatasetSQL
+
+
+class DMSDataModule(pl.LightningDataModule):
+
+    @staticmethod
+    def add_data_specific_args(parent_parser):
+        parser = ArgumentParser(parents=[parent_parser], add_help=False)
+
+        parser.add_argument("--ds_name",
+                            help="name of the dms dataset defined in constants.py",
+                            type=str, default="gb1")
+        parser.add_argument('--pdb_fn', type=str, default=None,
+                            help="pdb file for relative_3D position encoding")
+        parser.add_argument("--encoding",
+                            help="which data encoding to use",
+                            type=str, default="one_hot")
+        parser.add_argument("--target_names",
+                            help="the names of the target variables (currently only supports one target variable)",
+                            type=str, default=["score"])
+        parser.add_argument("--shuffle_targets",
+                            help="whether to shuffle the target labels/scores, for debugging",
+                            action="store_true")
+        parser.add_argument("--target_roll",
+                            help="how much to shift the targets relative to the variants, for debugging",
+                            default=0, type=int)
+        parser.add_argument("--standardize_targets",
+                            help="whether to standardize targets using train set",
+                            action="store_true")
+        parser.add_argument("--target_offset",
+                            help="an offset to add to every target value in the dataset",
+                            type=float, default=0)
+        parser.add_argument("--split_dir",
+                            help="the directory containing the train/tune/test split",
+                            type=str, default=None)
+        parser.add_argument("--use_val_for_training",
+                            help="whether to combine the val set with the train set for training",
+                            action="store_true")
+        parser.add_argument("--train_name",
+                            help="name of the train set in the split dir",
+                            type=str, default="train")
+        parser.add_argument("--val_name",
+                            help="name of the validation set in the split dir",
+                            type=str, default="val")
+        parser.add_argument("--test_name",
+                            help="name of the test set in the split dir",
+                            type=str, default="test")
+        # predict mode
+        parser.add_argument("--predict_mode",
+                            help="what predict mode to use",
+                            type=str, default="all_sets",
+                            choices=["all_sets", "full_dataset", "wt"])
+
+        parser.add_argument("--batch_size",
+                            help="batch size for the data loader and optimizer",
+                            type=int, default=32)
+
+        parser.add_argument("--num_dataloader_workers",
+                            help="number of workers for the data loader",
+                            type=int, default=4)
+
+        return parser
+
+    def __init__(self,
+                 ds_name: str,
+                 pdb_fn: Optional[str] = None,
+                 encoding: str = "one_hot",
+                 flatten_encoded_data: bool = False,
+                 target_names: Optional[Union[str, list[str], tuple[str]]] = None,
+                 split_dir: Optional[str] = None,
+                 use_val_for_training: bool = False,
+                 shuffle_targets: bool = False,
+                 target_roll: int = 0,
+                 standardize_targets: bool = False,
+                 target_offset: float = 0,
+                 train_name: str = "train",
+                 val_name: str = "val",
+                 test_name: str = "test",
+                 batch_size: int = 32,
+                 predict_mode: str = "all_sets",
+                 num_dataloader_workers: int = 4,
+                 *args, **kwargs):
+
+        super().__init__()
+
+        # basic dataset and encoding info
+        self.ds_name = ds_name
+        self.pdb_fn = None
+        self._init_pdb_fn(pdb_fn)
+
+        # for compatability with RosettaDataset and help setting up Relative3D RPE
+        self.unique_pdb_fns = None if self.pdb_fn is None else [self.pdb_fn]
+        # encoding such as one_hot, int_seqs, etc
+        self.encoding = encoding
+        self.flatten_encoded_data = flatten_encoded_data
+        # number of tokens needed in model gen code to set up the embedding layer
+        self.num_tokens = constants.NUM_CHARS
+        # batch size is needed for the data loader
+        self.batch_size = batch_size
+
+        # the directory containing the train/val/test split and the set names within that dir
+        self.split_dir = split_dir
+        self.use_val_for_training = use_val_for_training
+        # load dictionary containing split indices
+        # note: must use self.set_name_map or self.<set>_name when selecting a set from split_idxs
+        # in this module, "set_name" refers to the module set names train, val test
+        # and "user_set_name" refers to user set names given as arguments self.train_name, etc
+        self.split_idxs = None
+        self.has_val_set = None
+        self._init_split_dir(train_name, val_name)
+
+        # because we are using auto_test_name, need to load the split directory before
+        # setting the self.test_name because the function needs to check what set names are in the split
+        self.train_name = train_name
+        self.val_name = val_name
+        self.test_name = self._auto_test_name(test_name)
+        self.set_name_map = {"train": self.train_name, "val": self.val_name, "test": self.test_name}
+
+        # setting for dataloaders
+        self.predict_mode = predict_mode
+        self.num_dataloader_workers = num_dataloader_workers
+
+        # load the pandas dataframe for the dataset
+        self.ds = utils.load_dataset(ds_name=ds_name)
+
+        # set up and verify target_names (must be called after dataset is loaded in self.ds)
+        self.target_names = None
+        self.num_tasks = None
+        self._init_target_names(target_names)
+        self.shuffle_targets = shuffle_targets
+        self.target_offset = target_offset
+        # roll targets by this amount, for debugging
+        self.target_roll = target_roll
+        if self.target_names is not None and self.target_roll is not None and self.target_roll != 0:
+            for target_name in self.target_names:
+                self.ds[target_name] = np.roll(self.ds[target_name], shift=self.target_roll)
+
+        # standardization parameters for targets, calculated only on train set if
+        # a train set exists, otherwise calculated on the full dataset
+        self.standardize_targets = standardize_targets
+        self.target_standardize_means = None
+        self.target_standardize_stds = None
+        if self.standardize_targets:
+            self._calc_target_standardize_params()
+
+        # standardization parameters for when using rosetta energies as input features, calculated only on train set
+        self.input_standardize_means = None
+        self.input_standardize_stds = None
+        if enc.is_rosetta_encoding(encoding):
+            warnings.warn("detected rosetta encoding, calculating standardization parameters for input features")
+            self._calc_input_standardize_params()
+
+        # initialize DMSDataset that are used later in this module to load dataloaders, etc
+        self.train_ds = None
+        self.val_ds = None
+        self.test_ds = None
+        self.full_ds = None
+
+        # load dataset metadata
+        self.ds_metadata = utils.load_dataset_metadata()[self.ds_name]
+
+        # amino acid sequence length
+        self.aa_seq_len = len(self.ds_metadata["wt_aa"])
+
+        # the last couple of properties depend on getting a sample batch, so we can set the example
+        # input array and data encoding lengths used to construct some models
+        self.example_input_array = None
+        self.aa_encoding_len = None
+        self.seq_encoding_len = None
+        sample_batch = self.get_sample_batch()
+        if sample_batch is not None:
+            self._init_example_input_array(sample_batch)
+            self._init_encoding_lens(sample_batch)
+
+    def _init_pdb_fn(self, pdb_fn):
+        if pdb_fn == "auto":
+            self.pdb_fn = self.ds_metadata["pdb_fn"]
+        else:
+            self.pdb_fn = pdb_fn
+
+    def _init_example_input_array(self, sample_batch):
+        # example input array helps with sanity checking and printing full model summaries
+        self.example_input_array = {"x": torch.from_numpy(sample_batch), "pdb_fn": self.pdb_fn}
+
+    def get_sample_batch(self):
+        """ compute a sample batch of encoded data used for example input array, sequence encoding lengths, etc """
+        # encode a full batch of variants to get the encoding length (the last dim) and an example_input_array
+        variants = self.ds.iloc[0:self.batch_size]["variant"].tolist()
+        return self.get_encoded_variants(variants)
+
+    def _init_encoding_lens(self, sample_batch):
+        if sample_batch is None:
+            # encoding length stuff is extra, only used for METL models, so give option not to compute it
+            warnings.warn("Unable to compute aa_encoding_len and seq_encoding_len because sample_batch is None")
+            return
+        if len(sample_batch.shape) not in [2, 3]:
+            raise ValueError("temp_enc_variant has an unknown shape: {}".format(sample_batch.shape))
+        elif len(sample_batch.shape) == 2:
+            # if 2 dimensions, then it's a seq-level encoding (batch_size, encoded_seq)
+            self.aa_encoding_len = 0
+            self.seq_encoding_len = sample_batch.shape[-1]
+        elif len(sample_batch.shape) == 3:
+            # if 3 dimensions, then it's an amino-acid level encoding (batch_size, aa_seq_len, enc_len)
+            self.aa_encoding_len = sample_batch.shape[-1]
+            self.seq_encoding_len = self.aa_seq_len * self.aa_encoding_len
+            # an additional validation check just in case
+            if self.aa_seq_len != sample_batch.shape[-2]:
+                raise ValueError("expected aa_seq_len to be {}, but temp_enc_variant is {}".format(
+                    self.aa_seq_len, sample_batch.shape[-2]))
+
+    def _auto_test_name(self, test_name):
+        if test_name != "auto":
+            return test_name
+
+        if self.split_idxs is None:
+            raise ValueError("unable to determine test set name because no split directory provided")
+
+        if "test" in self.split_idxs:
+            # prioritize "test" rather than "stest"
+            test_name = "test"
+        elif "stest" in self.split_idxs:
+            test_name = "stest"
+        else:
+            raise ValueError("unable to determine test set name because neither 'test' nor 'stest' are in split")
+
+        return test_name
+
+    def _init_split_dir(self, train_name, val_name):
+        if self.split_dir is None:
+            warnings.warn("Split directory is None for DMSDataModule")
+        else:
+            self.split_idxs = sd.load_split_dir(self.split_dir)
+            if self.use_val_for_training:
+                # combine the train and val set into the test set, and delete the val set
+                self.split_idxs[train_name] = np.concatenate((self.split_idxs[train_name], self.split_idxs[val_name]))
+                del self.split_idxs[val_name]
+            self.has_val_set = val_name in self.split_idxs
+
+    def _init_target_names(self, target_names):
+        if target_names is None:
+            return
+
+        if not isinstance(target_names, list) and not isinstance(target_names, tuple):
+            target_names = [target_names]
+
+        # verify all the target names are in the dataset
+        for tn in target_names:
+            if tn not in self.ds:
+                raise ValueError("target not found in dataset: {}".format(tn))
+
+        self.target_names = target_names
+        self.num_tasks = len(self.target_names)
+
+    def _calc_target_standardize_params(self):
+        """ calculate the means and standard deviations of all energy terms for the train set """
+        # if there is no split... standardize using the full dataset, but throw a warning just in case
+        if self.split_idxs is None:
+            warnings.warn("Computing target standardization params using full dataset because there is no train split")
+            target_vals = self._get_raw_targets(None)
+        else:
+            target_vals = self._get_raw_targets("train")
+
+        # calculate mean and standard deviation
+        self.target_standardize_means = np.nanmean(target_vals, axis=0)
+        # ddof=0 to match sklearn's StandardScaler
+        self.target_standardize_stds = np.nanstd(target_vals, axis=0, ddof=0)
+
+    def _calc_input_standardize_params(self):
+        """ calculate the means and standard deviations of all energy terms for the train set """
+        standardization_set = "train"
+        if self.split_idxs is None:
+            # if there is no split... standardize using the full dataset, but throw a warning just in case
+            standardization_set = None
+            warnings.warn("Computing input standardization params using full dataset because there is no train split")
+
+        # note: we are using concat=False so enc_data will be a list of arrays (one for each encoding)
+        # we do this because we only need to standardize Rosetta encodings and this helps loop through the encodings
+        enc_data = self._get_raw_encoded_data(standardization_set, concat=False)
+        if not isinstance(enc_data, list):
+            enc_data = [enc_data]
+
+        # note: this assumes the data will be flattened, so the standardization parameters are flattened as well
+        # we only need to standardize the rosetta-based encodings...
+        standardize_means = []
+        standardize_stds = []
+        for e, ed in zip(self.encoding.split("+"), enc_data):
+            if enc.is_rosetta_encoding(e):
+                # calculate mean and standard deviation
+                standardize_means.append(np.nanmean(ed, axis=0))
+                # ddof=0 to match sklearn's StandardScaler
+                standardize_stds.append(np.nanstd(ed, axis=0, ddof=0))
+            else:
+                # if not a rosetta encoding, then just use 0 and 1 for mean and standard deviation
+                # note we need to use the flattened shape of this encoding because
+                # it might be a residue-level encoding like one-hot
+                # we assume that the encoding will eventually be flattened (when we use concat=True)
+                # so using the flattened shape will match that
+                if len(ed.shape) == 1:
+                    # if 1D, then it's just a single value for each sample, thus flattened encoding length is 1
+                    flattened_enc_shape = 1
+                elif len(ed.shape) >= 2:
+                    # if 2D or more, calculate the flattened encoding length by multiplying dimensions after dim 0
+                    flattened_enc_shape = np.prod(ed.shape[1:])
+                else:
+                    raise ValueError("unknown shape for encoding: {}".format(ed.shape))
+
+                standardize_means.append(np.zeros(flattened_enc_shape))
+                standardize_stds.append(np.ones(flattened_enc_shape))
+
+        # now concatenate the means and standard deviations for each encoding
+        self.input_standardize_means = np.concatenate(standardize_means)
+        self.input_standardize_stds = np.concatenate(standardize_stds)
+
+    def prepare_data(self):
+        # prepare_data is called from a single GPU. Do not use it to assign state (self.x = y).
+        pass
+
+    def get_variants(self, set_name: Optional[str]):
+        if set_name is None:
+            variants = self.ds["variant"].tolist()
+        else:
+            idxs = self.get_split_idxs(set_name)
+            variants = self.ds.iloc[idxs]["variant"].tolist()
+        return variants
+
+    @staticmethod
+    def _standardize(data, means, stds):
+        if means is None or stds is None:
+            raise ValueError("need to standardize, but standardize params are None")
+
+        standardized_data = np.divide((data - means), stds, out=np.zeros_like(data), where=stds != 0)
+        return standardized_data
+
+    def _standardize_inputs(self, data):
+        """ perform standardization of rosetta energies using the given means and standard deviations """
+        if self.input_standardize_means is None or self.input_standardize_stds is None:
+            raise ValueError("need to standardize rosetta encoded data, but standardize params are None")
+        energies = self._standardize(data, self.input_standardize_means, self.input_standardize_stds)
+        return energies
+
+    def _standardize_targets(self, data):
+        if self.target_standardize_means is None or self.target_standardize_stds is None:
+            raise ValueError("need to standardize targets, but standardize params are None")
+        targets = self._standardize(data, self.target_standardize_means, self.target_standardize_stds)
+        return targets
+
+    def _get_raw_encoded_variants(self, variants: list[str], concat: bool = True):
+        enc_data = enc.encode(encoding=self.encoding, variants=variants, ds_name=self.ds_name, concat=concat)
+        return enc_data
+
+    def get_encoded_variants(self, variants: list[str]):
+        enc_data = self._get_raw_encoded_variants(variants, concat=True)
+
+        # standardize if using rosetta encoding
+        if enc.is_rosetta_encoding(self.encoding):
+            enc_data = self._standardize_inputs(enc_data)
+
+        if self.flatten_encoded_data:
+            enc_data = enc_data.reshape(enc_data.shape[0], -1)
+
+        return enc_data
+
+    def _get_raw_encoded_data(self, set_name: Optional[str], concat: bool = True):
+        variants = self.get_variants(set_name)
+        return self._get_raw_encoded_variants(variants, concat=concat)
+
+    def get_encoded_data(self, set_name: Optional[str]):
+        # print("Encoding data for set: {}".format(set_name))
+        variants = self.get_variants(set_name)
+        return self.get_encoded_variants(variants)
+
+    def _get_raw_targets(self, set_name: Optional[str]):
+        if self.target_names is None:
+            return None
+
+        if set_name is None:
+            targets = self.ds[self.target_names].to_numpy().astype(np.float32)
+        else:
+            idxs = self.get_split_idxs(set_name)
+            targets = self.ds.iloc[idxs][self.target_names].to_numpy().astype(np.float32)
+
+        return targets
+
+    def get_targets(self, set_name: Optional[str], squeeze: bool = False):
+        targets = self._get_raw_targets(set_name)
+        if targets is None:
+            return None
+
+        # standardize FIRST, then add offset
+        if self.standardize_targets:
+            targets = self._standardize_targets(targets)
+
+        # add target offset for testing effect of target magnitude on training...
+        targets += self.target_offset
+
+        if self.shuffle_targets:
+            np.random.shuffle(targets)
+
+        if squeeze:
+            targets = targets.squeeze()
+
+        return targets
+
+    def has_set(self, set_name: str, user_set_name: bool = False):
+        if self.split_idxs is None:
+            return False
+        if user_set_name:
+            return set_name in self.split_idxs
+        else:
+            return self.set_name_map[set_name] in self.split_idxs
+
+    def get_split_idxs(self, set_name: Optional[str] = None, user_set_name: bool = False):
+        """ get the indices for the given set name, or all indices if set_name is None
+            if user_set_name is True, then the set_name is assumed to be the user-set name, not the internal name """
+
+        if set_name is None:
+            return self.split_idxs
+        else:
+            if user_set_name:
+                # the provided set_name is a user-defined set name given in the split file
+                # self.split_idxs is keyed by user set names, so we can access it directly
+                return self.split_idxs[set_name]
+            else:
+                # the provided set_name is an internal set name, either "train", "val", or "test"
+                # self.set_name_map maps internal set names to user-defined set names, so we can index self.split_idxs
+                return self.split_idxs[self.set_name_map[set_name]]
+
+    def get_ds(self, set_name: Optional[str]):
+        # special handling for wild-type only variant
+        if set_name == "_wt":
+            targets = None
+            enc_data = self.get_encoded_variants(["_wt"])
+        else:
+            targets = self.get_targets(set_name)
+            enc_data = self.get_encoded_data(set_name)
+
+        torch_ds = datasets.DMSDataset(inputs=torch.from_numpy(enc_data),
+                                       targets=None if targets is None else torch.from_numpy(targets),
+                                       pdb_fn=self.pdb_fn)
+        return torch_ds
+
+    def setup(self, stage=None):
+        # verify split_dir and target_names were provided if this datamodule is used for fitting or testing
+        # predicting doesn't require a split_dir because prediction can be done on full dataset
+        if stage == "fit" or stage == "test":
+            if self.split_dir is None:
+                raise ValueError("datamodule is being set up for: {}, but split_dir is None".format(stage))
+            if self.target_names is None:
+                raise ValueError("datamodule is being set up for: {}, but target_names is None".format(stage))
+
+        if stage == "fit" or stage is None:
+            # if stage is None, but a split dir is provided, load the train_ds and val_ds
+            if self.split_dir is not None and self.target_names is not None:
+                self.train_ds = self.get_ds("train")
+                if self.has_val_set:
+                    self.val_ds = self.get_ds("val")
+
+        if stage == "test" or stage is None:
+            # if stage is None, but a split dir is provided, load the test_ds
+            if self.split_dir is not None and self.target_names is not None:
+                self.test_ds = self.get_ds("test")
+
+        if stage == "predict" or stage is None:
+            if self.predict_mode == "full_dataset":
+                self.full_ds = self.get_ds(None)
+            elif self.predict_mode == "wt":
+                self.wt_ds = self.get_ds("_wt")
+            elif self.predict_mode == "all_sets":
+                # just in case, make sure all the split datasets have been set up
+                # this should already be the case if the model was just trained with this datamodule
+                if self.train_ds is None:
+                    self.train_ds = self.get_ds("train")
+                if self.has_val_set and self.val_ds is None:
+                    self.val_ds = self.get_ds("val")
+                if self.test_ds is None:
+                    self.test_ds = self.get_ds("test")
+
+    def _get_dataloader(self, ds):
+        """ helper function for loading train, val, and test dataloaders """
+        if ds is None:
+            # return None for the dataloader if the underlying dataset is None
+            # handles the case for when there is no validation set and val dataloader should be None
+            return None
+        else:
+            return data_utils.DataLoader(ds,
+                                         batch_size=self.batch_size,
+                                         num_workers=self.num_dataloader_workers,
+                                         persistent_workers=True if self.num_dataloader_workers > 0 else False)
+
+    def train_dataloader(self):
+        return self._get_dataloader(self.train_ds)
+
+    def val_dataloader(self):
+        return self._get_dataloader(self.val_ds)
+
+    def test_dataloader(self):
+        return self._get_dataloader(self.test_ds)
+
+    def predict_dataloader(self):
+        if self.predict_mode == "all_sets":
+            return [self.train_dataloader(), self.val_dataloader(), self.test_dataloader()]
+        elif self.predict_mode == "train_set":
+            return self.train_dataloader()
+        elif self.predict_mode == "full_dataset":
+            return self._get_dataloader(self.full_ds)
+        elif self.predict_mode == "wt":
+            return self._get_dataloader(self.wt_ds)
+
+
+class RosettaDataModule(pl.LightningDataModule):
+
+    @staticmethod
+    def add_data_specific_args(parent_parser):
+        parser = ArgumentParser(parents=[parent_parser], add_help=False)
+
+        parser.add_argument("--ds_fn",
+                            help="filename of the csv/hdf5 dataset",
+                            type=str, default="data/rosetta_data/gb1_sample/gb1_sample.h5")
+
+        parser.add_argument("--encoding",
+                            help="which data encoding to use. should be int_seqs if using an embedding."
+                                 " for backwards compat, auto will adopt old behavior of choosing encoding"
+                                 " based on the model type",
+                            type=str, default="auto")
+
+        parser.add_argument("--split_dir",
+                            help="the directory containing the train/tune/test split",
+                            type=str, default="data/rosetta_data/gb1_sample/splits/standard_tr0.8_tu0.1_te0.1_w3da7a2fd8b08_r11")
+        parser.add_argument("--train_name",
+                            help="name of the train set in the split dir",
+                            type=str, default="train")
+        parser.add_argument("--val_name",
+                            help="name of the validation set in the split dir",
+                            type=str, default="val")
+        parser.add_argument("--test_name",
+                            help="name of the test set in the split dir",
+                            type=str, default="test")
+
+        parser.add_argument("--target_group",
+                            help="which group of energies to use as targets. "
+                                 "if set, overrides both target_names and target_names_exclude",
+                            type=str, default="standard",
+                            choices=["standard-all", "standard", "standard-docking", "docking"])
+        parser.add_argument("--target_names",
+                            help="names of rosetta energies to use as targets (overrides exclude)",
+                            type=str, nargs="+", default=None)
+        parser.add_argument("--target_names_exclude",
+                            help="include all STANDARD (non-docking) energies, except these",
+                            type=str, nargs="*", default=None)
+
+        parser.add_argument("--batch_size",
+                            help="batch size for the data loader and optimizer",
+                            type=int, default=32)
+
+        return parser
+
+    def __init__(self,
+                 ds_fn: str,
+                 encoding: str,
+                 split_dir: str,
+                 train_name: str = "train",
+                 val_name: str = "val",
+                 test_name: str = "test",
+                 batch_size: int = 32,
+                 # target tasks
+                 target_group: Optional[str] = None,
+                 target_names: Optional[Union[list[str], tuple[str]]] = None,
+                 target_names_exclude: Union[list[str], tuple[str]] = (),
+                 # whether to use the distributed sampler for the train and val dataloaders
+                 # the test dataloader does NOT use the distributed sampler, regardless of this setting
+                 enable_distributed_sampler: bool = False,
+                 # these can probably be combined into a single arg: model_supports_multiple_pdbs_in_batch
+                 # whether to use the PDB sampler **if the number of unique PDBs is > 1**
+                 # supports the global CNN model, which doesn't need the PDB sampler
+                 enable_pdb_sampler: bool = True,
+                 # whether to use datasets.pad_sequences_collate_fn for dataloaders (for when enable_pdb_sampler=False)
+                 # supports the global CNN model, which supports multiple PDBs in a single batch
+                 use_padding_collate_fn: bool = False,
+                 *args, **kwargs):
+
+        super().__init__()
+
+        # database fn
+        self.ds_fn = ds_fn
+
+        # target/task names and number of tasks
+        self.target_names = utils.get_rosetta_energy_targets(target_group=target_group,
+                                                             target_names=target_names,
+                                                             target_names_exclude=target_names_exclude)
+        self.num_tasks = len(self.target_names)
+
+        # the directory containing the train/val/test split and the set names within that dir
+        self.train_name = train_name
+        self.val_name = val_name
+        self.test_name = test_name
+        self.split_dir = split_dir
+        self.split = None
+        self._init_split()
+
+        # batch size is needed for the data loader
+        self.batch_size = batch_size
+
+        # the data encoding
+        self.encoding = encoding
+
+        # number of tokens needed in model gen code to set up the embedding layer
+        self.num_tokens = constants.NUM_CHARS
+
+        # load PDB fn for each example, used for PDBSampler dataloader
+        self.pdb_fns = pd.read_csv(join(dirname(self.ds_fn), "pdb_fns.txt"), header=None).iloc[:, 0].to_numpy()
+        # split PDB fns for train/val/test sets (helps with batch sampler)
+        self.pdb_fns_split = {set_name: self.pdb_fns[self.split[set_name]].tolist()
+                              for set_name in [self.train_name, self.val_name, self.test_name]}
+        # the unique PDB fns used in the dataset (splits)
+        # todo: sort this so it is always in the same order
+        #   is this the reason the buffers weren't syncing across processes w/ DDP?
+        self.unique_pdb_fns = list(set().union(*[set(v) for v in self.pdb_fns_split.values()]))
+
+        # for determining what kind of samplers to use
+        self.enable_distributed_sampler = enable_distributed_sampler
+        self.enable_pdb_sampler = enable_pdb_sampler
+        self.use_pdb_sampler = False
+        if enable_pdb_sampler and len(self.unique_pdb_fns) > 1:
+            self.use_pdb_sampler = True
+        self.use_padding_collate_fn = use_padding_collate_fn
+
+        # error checking for drop_last and distributed sampler when batch size is larger than dataset size
+        if self.enable_distributed_sampler:
+            for set_name in [self.train_name, self.val_name, self.test_name]:
+                if len(self.split[set_name]) < self.batch_size:
+                    raise ValueError("Batch_size {} is larger than the number of examples in set '{}'. "
+                                     "This is incompatible with enable_distributed_sampler, "
+                                     "which requires drop_last=True".format(self.batch_size, set_name))
+
+        # length of the longest sequence in dataset
+        self.pdb_index = pd.read_csv("data/rosetta_data/pdb_index.csv", index_col="pdb_fn")
+
+        # aa_seq_len is the length of the longest sequence in the dataset
+        self.aa_seq_len = max(self.pdb_index.loc[self.unique_pdb_fns]["seq_len"])
+
+        # full_seq_len factors in sequence length increase due to CLS token and potential future padding
+        self.full_seq_len = self.aa_seq_len
+
+        # aa_encoding_len and seq_encoding_len
+        if self.encoding == "int_seqs":
+            # int seqs use a single integer to represent each possible amino acid token
+            self.aa_encoding_len = 1
+            self.seq_encoding_len = self.full_seq_len * self.aa_encoding_len
+        elif self.encoding == "one_hot":
+            # one_hot doesn't support cls tokens, but can still use self.num_tokens here
+            self.aa_encoding_len = self.num_tokens
+            self.seq_encoding_len = self.full_seq_len * self.aa_encoding_len
+        else:
+            raise ValueError("unsupported encoding {}".format(self.encoding))
+
+        self.example_input_array = self.get_example_input_array()
+
+    def _init_split(self):
+        self.split = sd.load_split_dir(self.split_dir)
+
+        # check that the split dir contains the train/val/test sets
+        for set_name in [self.train_name, self.val_name, self.test_name]:
+            if set_name not in self.split:
+                raise ValueError("split dir '{}' does not contain set '{}'".format(self.split_dir, set_name))
+
+    def get_example_input_array(self):
+        """ set up the example input array """
+
+        # use the first pdb file in self.unique_pdb_fns as the example PDB file
+        # we need to do this because we are assuming one PDB per batch
+        # so, we need to choose a PDB file for the example batch
+        example_pdb_fn = self.unique_pdb_fns[0]
+        example_aa_seq_len = self.pdb_index.loc[example_pdb_fn]["seq_len"]
+        example_full_seq_len = example_aa_seq_len
+
+        # log some info about the example input array
+        print("Using example_input_array with pdb_fn='{}' and aa_seq_len={}".format(example_pdb_fn, example_aa_seq_len))
+
+        if self.encoding == "int_seqs":
+            arr = torch.randint(low=0, high=self.num_tokens, size=(self.batch_size, example_full_seq_len))
+        elif self.encoding == "one_hot":
+            example_indices = torch.randint(low=0, high=self.num_tokens, size=(self.batch_size, example_full_seq_len))
+            arr = F.one_hot(example_indices, self.num_tokens).float()
+        else:
+            raise ValueError("unsupported encoding for example_input_array: {}".format(self.encoding))
+
+        # use a dict as the example input array because we want to pass in the PDB file.
+        # this must be compatible with the task's forward() method... it is.
+        # but note that the task's forward() method accepts different args than outputted by
+        # RosettaDatasetSQL. the Task processes the dict from RosettaDatasetSQL in _shared_step
+        # but if the forward method ever changes to take dicts, we need to account for it here.
+        return {"x": arr, "pdb_fn": example_pdb_fn}
+
+    def prepare_data(self):
+        # prepare_data is called from a single GPU. Do not use it to assign state (self.x = y)
+        # use this method to do things that might write to disk or that need to be done only from a single process
+        # in distributed settings.
+        pass
+
+    def get_ds(self, set_name: str) -> torch.utils.data.Dataset:
+        torch_ds = RosettaDatasetSQL(
+            db_fn=self.ds_fn,
+            split_dir=self.split_dir,
+            set_name=set_name,
+            target_names=self.target_names,
+            encoding=self.encoding,
+        )
+        return torch_ds
+
+    def setup(self, stage=None):
+        if stage == 'fit' or stage is None:
+            self.train_ds = self.get_ds(self.train_name)
+            self.val_ds = self.get_ds(self.val_name)
+
+        if stage == 'test' or stage is None:
+            self.test_ds = self.get_ds(self.test_name)
+
+    def get_dataloader(self,
+                       set_name: str,
+                       ds: torch.utils.data.Dataset,
+                       shuffle: bool,
+                       use_distributed_sampler: bool = False,
+                       num_workers: int = 4) -> DataLoader:
+
+        # use persistent workers if num_workers > 0
+        persistent_workers = True if num_workers > 0 else False
+
+        # whether to drop the last batch if it is smaller than the batch size
+        # automatically enabled when using a distributed sampler
+        # otherwise, it is disabled
+        drop_last = True if use_distributed_sampler else False
+
+        if use_distributed_sampler and not self.use_pdb_sampler:
+            sampler = torch.utils.data.distributed.DistributedSampler(ds, shuffle=shuffle, drop_last=drop_last)
+            return DataLoader(ds,
+                              batch_size=self.batch_size,
+                              persistent_workers=persistent_workers,
+                              sampler=sampler,
+                              num_workers=num_workers,
+                              collate_fn=datasets.pad_sequences_collate_fn if self.use_padding_collate_fn else None)
+
+        elif use_distributed_sampler and self.use_pdb_sampler:
+            pdb_fns = self.pdb_fns_split[set_name]
+            sampler = pdb_sampler.PDBSamplerDistributed(pdb_fns,
+                                                        batch_size=self.batch_size,
+                                                        shuffle=shuffle,
+                                                        drop_last=drop_last)
+            return DataLoader(ds,
+                              batch_sampler=sampler,
+                              persistent_workers=persistent_workers,
+                              num_workers=num_workers)
+
+        elif not use_distributed_sampler and not self.use_pdb_sampler:
+            return DataLoader(ds,
+                              batch_size=self.batch_size,
+                              persistent_workers=persistent_workers,
+                              shuffle=shuffle,
+                              drop_last=drop_last,
+                              num_workers=num_workers,
+                              collate_fn=datasets.pad_sequences_collate_fn if self.use_padding_collate_fn else None)
+
+        elif not use_distributed_sampler and self.use_pdb_sampler:
+            pdb_fns = self.pdb_fns_split[set_name]
+            sampler = pdb_sampler.PDBSampler(pdb_fns,
+                                             batch_size=self.batch_size,
+                                             shuffle=shuffle,
+                                             drop_last=drop_last)
+            return DataLoader(ds,
+                              batch_sampler=sampler,
+                              persistent_workers=persistent_workers,
+                              num_workers=num_workers)
+
+    def train_dataloader(self):
+        return self.get_dataloader(self.train_name, self.train_ds, shuffle=True,
+                                   use_distributed_sampler=self.enable_distributed_sampler, num_workers=4)
+
+    def val_dataloader(self):
+        return self.get_dataloader(self.val_name, self.val_ds, shuffle=False,
+                                   use_distributed_sampler=self.enable_distributed_sampler, num_workers=4)
+
+    def test_dataloader(self):
+        return self.get_dataloader(self.test_name, self.test_ds, shuffle=False,
+                                   use_distributed_sampler=False, num_workers=4)
+
+
+class BasicRosettaDataModule(pl.LightningDataModule):
+    """ a very basic datamodule for Rosetta datasets made for the simple purpose
+        of running inference on the super test set which is needed to compute final metrics for the paper"""
+
+    def __init__(self,
+                 ds_fn: str,
+                 split_dir: str,
+                 predict_mode: str,
+                 batch_size: int = 32,
+                 encoding: str = "int_seqs"):
+
+        super().__init__()
+
+        self.ds_fn = ds_fn
+        self.split_dir = split_dir
+        self.split = sd.load_split_dir(split_dir)
+        self.predict_mode = predict_mode
+        self._validate_predict_mode()
+        self.batch_size = batch_size
+        self.encoding = encoding
+
+        # initialize list of pdb files present in the dataset (based on predict mode)
+        self._init_pdb_fns()
+
+        # load the pdb index
+        self.pdb_index = pd.read_csv("data/rosetta_data/pdb_index.csv", index_col="pdb_fn")
+
+        # automatically determine whether to use the PDB sampler (must be enabled if multiple unique PDBs present)
+        self.use_pdb_sampler = False
+        if len(set(self.pdb_fns)) > 1:
+            self.use_pdb_sampler = True
+
+        self.example_input_array = self.get_example_input_array()
+
+    def get_example_input_array(self):
+        example_pdb_fn = self.pdb_fns[0]
+        example_aa_seq_len = self.pdb_index.loc[example_pdb_fn]["seq_len"]
+        example_full_seq_len = example_aa_seq_len
+
+        # log some info about the example input array
+        print("Using example_input_array with pdb_fn='{}' and aa_seq_len={}".format(example_pdb_fn, example_aa_seq_len))
+
+        if self.encoding == "int_seqs":
+            arr = torch.randint(low=0, high=constants.NUM_CHARS, size=(self.batch_size, example_full_seq_len))
+        elif self.encoding == "one_hot":
+            example_inds = torch.randint(low=0, high=constants.NUM_CHARS, size=(self.batch_size, example_full_seq_len))
+            arr = F.one_hot(example_inds, constants.NUM_CHARS).float()
+        else:
+            raise ValueError("unsupported encoding for example_input_array: {}".format(self.encoding))
+        return {"x": arr, "pdb_fn": example_pdb_fn}
+
+    def _validate_predict_mode(self):
+        # full_dataset is not supported because RosettaDatasetSQL currently requires a set_name
+        if self.predict_mode == "full_dataset":
+            raise ValueError(f"predict_mode {self.predict_mode} not currently supported")
+
+        valid_split_predict_modes = list(self.split.keys())
+        if self.predict_mode not in valid_split_predict_modes:
+            raise ValueError(f"valid split predict modes are: {valid_split_predict_modes}")
+
+    def _init_pdb_fns(self):
+        """ return a list of pdb fns in order for the data this module will output based on predict mode """
+        if self.predict_mode == "full_dataset":
+            self.pdb_fns = pd.read_csv(join(dirname(self.ds_fn), "pdb_fns.txt"), header=None).iloc[:, 0].to_numpy()
+        else:
+            # predict_mode is a set_name
+            all_pdb_fns = pd.read_csv(join(dirname(self.ds_fn), "pdb_fns.txt"), header=None).iloc[:, 0].to_numpy()
+            self.pdb_fns = all_pdb_fns[self.split[self.predict_mode]].tolist()
+
+    def prepare_data(self):
+        pass
+
+    def setup(self, stage=None):
+        pass
+
+    def get_ds(self, set_name: str) -> torch.utils.data.Dataset:
+        torch_ds = RosettaDatasetSQL(
+            db_fn=self.ds_fn,
+            split_dir=self.split_dir,
+            set_name=set_name,
+            target_names=None,
+            encoding=self.encoding,
+        )
+        return torch_ds
+
+    def get_dataloader(self,
+                       ds: torch.utils.data.Dataset,
+                       num_workers: int = 4,
+                       shuffle: bool = False):
+        persistent_workers = True if num_workers > 0 else False
+        if self.use_pdb_sampler:
+            sampler = pdb_sampler.PDBSampler(self.pdb_fns,
+                                             batch_size=self.batch_size,
+                                             shuffle=shuffle,
+                                             drop_last=False)
+            return DataLoader(ds,
+                              batch_sampler=sampler,
+                              persistent_workers=persistent_workers,
+                              num_workers=num_workers)
+        else:
+            return DataLoader(ds,
+                              batch_size=self.batch_size,
+                              persistent_workers=persistent_workers,
+                              shuffle=shuffle,
+                              drop_last=False,
+                              num_workers=num_workers)
+
+    def train_dataloader(self):
+        raise NotImplementedError("this datamodule is only for prediction")
+
+    def val_dataloader(self):
+        raise NotImplementedError("this datamodule is only for prediction")
+
+    def test_dataloader(self):
+        raise NotImplementedError("this datamodule is only for prediction")
+
+    def predict_dataloader(self):
+        ds = self.get_ds(self.predict_mode)
+        return self.get_dataloader(ds, num_workers=4, shuffle=False)

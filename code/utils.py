@@ -1,10 +1,12 @@
 """ general utility functions used throughput codebase """
 import os
-from os.path import isfile, isdir
-from typing import Optional
+from os.path import isfile, isdir, join
+from typing import Optional, Union
 from io import StringIO
+import uuid
 
 import pandas as pd
+import shortuuid
 import yaml
 from Bio import PDB
 from Bio.PDB.PDBParser import PDBParser
@@ -216,3 +218,71 @@ def extract_seq_from_pdb(pdb_fn: str,
         return {ch.id: seq for ch, seq in zip(chains, sequences)}
     else:
         return sequences[0]
+
+
+def get_rosetta_energy_targets(target_group: str = "standard-all",
+                               target_names: Optional[Union[list[str], tuple[str]]] = None,
+                               target_names_exclude: Union[list[str], tuple[str]] = (
+                                       'filter_total_score', 'dslf_fa13', 'res_count_all', 'linear_chainbreak',
+                                       'overlap_chainbreak')) -> list[str]:
+    """
+    Error checking and set up for Rosetta target names.
+    The parameter target_group was added to support docking energies more easily.
+    Backward compatability should be maintained if target_group is set to "standard_all" (the default).
+    :param target_group: the group of energies to use as the base for target_names and target_names_exclude
+    :param target_names: the list of target names to use (a subset of the target group energies)
+    :param target_names_exclude: the list of target names to exclude (a subset of the target group energies)
+    :return: the list of target names to use
+    """
+
+    if target_group == "standard-all":
+        base_targets = constants.ROSETTA_ATTRIBUTES
+    elif target_group == "standard":
+        base_targets = constants.ROSETTA_ATTRIBUTES_TRAINING
+    elif target_group == "standard-docking":
+        base_targets = list(constants.ROSETTA_ATTRIBUTES_TRAINING) + list(constants.ROSETTA_ATTRIBUTES_DOCKING_TRAINING)
+    elif target_group == "docking":
+        base_targets = constants.ROSETTA_ATTRIBUTES_DOCKING_TRAINING
+    else:
+        raise ValueError("target_group not recognized")
+
+    if target_names is None:
+        if target_names_exclude is None:
+            return list(base_targets)
+        else:
+            return [attr for attr in base_targets if attr not in target_names_exclude]
+    elif isinstance(target_names, list) or isinstance(target_names, tuple):
+        if all([tg in base_targets for tg in target_names]):
+            return list(target_names)
+        else:
+            raise ValueError("some target_names not found in master list")
+    else:
+        raise ValueError("target_names should be a list: {}".format(target_names))
+
+
+def gen_model_uuid():
+    my_uuid = shortuuid.encode(uuid.uuid4())[:8]
+    return my_uuid
+
+
+def log_dir_name(log_dir_base, my_uuid):
+    # maybe this should go in shared_model (or a new model_utils?) instead
+    return join(log_dir_base, my_uuid)
+
+
+def save_args(args_dict, out_fn, ignore=None):
+    """ save argparse arguments dictionary back to a file that can be used as input to regression.py """
+    with open(out_fn, "w") as f:
+        for k, v in args_dict.items():
+            # ignore these special arguments
+            if (ignore is None) or (k not in ignore):
+                # if a flag is set to false, dont include it in the argument file
+                if (not isinstance(v, bool)) or (isinstance(v, bool) and v):
+                    f.write("--{}\n".format(k))
+                    # if a flag is true, no need to specify the "true" value
+                    if not isinstance(v, bool):
+                        if isinstance(v, list):
+                            for lv in v:
+                                f.write("{}\n".format(lv))
+                        else:
+                            f.write("{}\n".format(v))
