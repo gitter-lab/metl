@@ -32,7 +32,7 @@ dependencies:
   - wandb=0.13.5
   - tensorboard=2.11.0
   - memory_profiler=0.58.0
-  - rich=12.6.0
+  - rich=13.7.0
   - pyqt=5.15.7
   - sqlalchemy=1.4.43
   - aenum=3.1.11
