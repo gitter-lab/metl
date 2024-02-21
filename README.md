@@ -23,10 +23,23 @@ For GPU support, make sure you have the appropriate CUDA version installed.
 # Pretraining on Rosetta data
 
 Rosetta pretraining data is stored in the [rosetta_data](data/rosetta_data) directory.
-This repository contains a sample Rosetta dataset for [avGFP](data/rosetta_data/avgfp), which can be used to pretrain a toy avGFP METL-Local model.
+This repository contains a sample Rosetta dataset for [avGFP](data/rosetta_data/avgfp) with 10,000 variants, which can be used to pretrain a toy avGFP METL-Local model.
 For more information on how to acquire or create a Rosetta dataset, see the README in the [rosetta_data](data/rosetta_data) directory.
 
-Once you've downloaded or created a Rosetta pretraining dataset, you can pretrain a METL model using...
+Once you've downloaded or created a Rosetta pretraining dataset, you can pretrain a METL model using [train_source_model.py](code/train_source_model.py).
+The notebook [pretraining.ipynb](notebooks/pretraining.ipynb) shows a complete example of how to pretrain a METL model using the sample avGFP dataset.
+
+You can run the pretraining script on the sample dataset using the following command:
+
+```bash
+python code/train_source_mode.py @args/pretrain_avgfp_local.txt
+```
+
+Note this might take a while to train, so for demonstration purposes, you may want to limit the number of epochs and amount of data using the following:
+
+```bash
+python code/train_source_mode.py @args/pretrain_avgfp_local.txt --max_epochs 5 --limit_train_batches 5 --limit_val_batches 5 --limit_test_batches 5
+```
 
 # Finetuning on experimental data
 
