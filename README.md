@@ -51,7 +51,8 @@ See the README in the [dms_data](data/dms_data) directory for information about 
 In addition to experimental data, you will need a pretrained METL model to finetune.
 You can pretrain METL models yourself using this repository, or you can use our pretrained METL models from the [metl-pretrained](url) repository. 
 
-Once you have a pretrained METL model and an experimental dataset, you can finetune the model using...
+Once you have a pretrained METL model and an experimental dataset, you can finetune the model using [train_target_model.py](code/train_target_model.py).
+The notebook [finetuning.ipynb](notebooks/finetuning.ipynb) shows a complete example of how to finetune a METL model using the sample avGFP dataset.
 
 # Additional information
 
