@@ -271,7 +271,7 @@ def main(args):
         trainer_strategy = DDPStrategy(find_unused_parameters=False)
 
     # set up wandb to log gradients, parameter histograms
-    if args.wandb_log_grads:
+    if args.use_wandb and args.wandb_log_grads:
         loggers[0].watch(task, log="all", log_freq=args.grad_log_freq)
 
     # set up the trainer from argparse args

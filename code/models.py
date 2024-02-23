@@ -980,13 +980,29 @@ class TransferModel(nn.Module):
             pretrained_model = Model[pretrained_hparams["model_name"]].cls(**pretrained_hparams)
             self.pretrained_hparams = pretrained_hparams
         else:
-            # in this scenario, the pre-trained weights are loaded from the specified checkpoint file
-            # the checkpoint file is a RosettaTask checkpoint, containing source model weights
-            pretrained_checkpoint = tasks.RosettaTask.load_from_checkpoint(pretrained_ckpt_path, pdb_fns=pdb_fns)
-            # update the pre-trained model hparams with the new pdb_fns
-            pretrained_checkpoint.hparams["pdb_fns"] = pdb_fns
-            self.pretrained_hparams = pretrained_checkpoint.hparams
-            pretrained_model = pretrained_checkpoint.model
+            # check if we have a PyTorch Lightning checkpoint or a pure pytorch checkpoint
+            if pretrained_ckpt_path.endswith(".ckpt"):
+                # in this scenario, the pre-trained weights are loaded from the specified checkpoint file
+                # the checkpoint file is a RosettaTask checkpoint, containing source model weights
+                pretrained_checkpoint = tasks.RosettaTask.load_from_checkpoint(pretrained_ckpt_path, pdb_fns=pdb_fns)
+                # update the pre-trained model hparams with the new pdb_fns
+                pretrained_checkpoint.hparams["pdb_fns"] = pdb_fns
+                self.pretrained_hparams = pretrained_checkpoint.hparams
+                pretrained_model = pretrained_checkpoint.model
+
+            else:
+                # load from PyTorch checkpoint
+                ckpt = torch.load(pretrained_ckpt_path, map_location="cpu")
+                state_dict = ckpt["state_dict"]
+                pretrained_hparams = ckpt["hyper_parameters"]
+
+                # update the pre-trained model hparams with the new pdb_fns
+                pretrained_hparams["pdb_fns"] = pdb_fns
+                self.pretrained_hparams = pretrained_hparams
+
+                # create the model and load pretrained weights from the state dict
+                pretrained_model = Model[pretrained_hparams["model_name"]].cls(**pretrained_hparams)
+                pretrained_model.load_state_dict(state_dict)
 
         layers = collections.OrderedDict()
 

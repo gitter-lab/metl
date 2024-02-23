@@ -309,10 +309,8 @@ class DMSTask(pl.LightningModule):
 
         # these params are used for dual phase warmup learning rate scheduler
         unfreeze_backbone_at_epoch = None
-        fts_schedule_fn = None
         if hasattr(self, "hparams") and self.hparams is not None:
             unfreeze_backbone_at_epoch = self.hparams.get("unfreeze_backbone_at_epoch", None)
-            fts_schedule_fn = self.hparams.get("fts_schedule_fn", None)
 
         optimizer_config = training_utils.OptimizerConfig(self.optimizer,
                                                           self.weight_decay,
@@ -321,8 +319,7 @@ class DMSTask(pl.LightningModule):
                                                           self.warmup_steps,
                                                           self.phase2_lr_ratio,
                                                           unfreeze_backbone_at_epoch=unfreeze_backbone_at_epoch,
-                                                          max_epochs=self.trainer.max_epochs,
-                                                          fts_schedule_fn=fts_schedule_fn)
+                                                          max_epochs=self.trainer.max_epochs)
 
         return optimizer_config.get_optimizer_config(trainable_parameters, self.trainer.estimated_stepping_batches)
 

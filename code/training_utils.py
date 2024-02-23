@@ -573,30 +573,39 @@ def get_next_version(log_dir):
     return max(existing_versions) + 1
 
 
-def init_loggers(log_dir, my_uuid, wandb_online, wandb_project) -> tuple[WandbLogger, TensorBoardLogger, CSVLogger]:
+def init_loggers(log_dir,
+                 my_uuid,
+                 use_wandb,
+                 wandb_online,
+                 wandb_project) -> Union[tuple[WandbLogger, TensorBoardLogger, CSVLogger],
+                                         tuple[TensorBoardLogger, CSVLogger]]:
     """ set up logger callbacks for trainer """
-    # todo: make wandb logging optional...
     tb_logger = TensorBoardLogger(
         save_dir=join(log_dir, "tensorboard_{}".format(my_uuid)),
         name="",
         version="",
         log_graph=False
     )
-    wandb_logger = WandbLogger(
-        save_dir=log_dir,
-        id=my_uuid,
-        name=my_uuid,
-        offline=not wandb_online,
-        project=wandb_project,
-        entity="sgelman",
-        settings=wandb.Settings(symlink=False)
-    )
+    wandb_logger = None
+    if use_wandb:
+        wandb_logger = WandbLogger(
+            save_dir=log_dir,
+            id=my_uuid,
+            name=my_uuid,
+            offline=not wandb_online,
+            project=wandb_project,
+            settings=wandb.Settings(symlink=False)
+        )
     csv_logger = CSVLogger(
         save_dir=log_dir,
         name="",
         version=""
     )
-    return wandb_logger, tb_logger, csv_logger
+
+    if use_wandb:
+        return wandb_logger, tb_logger, csv_logger
+    else:
+        return tb_logger, csv_logger
 
 
 class OptimizerConfig:
@@ -781,3 +790,35 @@ class DelayedStartModelCheckpoint(ModelCheckpoint):
         if (self.start_epoch is not None) and (trainer.current_epoch < self.start_epoch):
             return
         super()._save_topk_checkpoint(trainer, monitor_candidates)
+
+
+class SimpleProgressMessages(Callback):
+
+    def on_sanity_check_start(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule") -> None:
+        print("Starting sanity check...")
+
+    def on_sanity_check_end(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule") -> None:
+        print("Sanity check complete.")
+
+    def on_train_start(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule") -> None:
+        print("Starting training...")
+
+    def on_train_epoch_end(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule") -> None:
+        if trainer.sanity_checking:
+            # don't print progress during the sanity check
+            return
+        train_loss_epoch = trainer.callback_metrics.get('train_loss_epoch', np.nan)
+        val_loss = trainer.callback_metrics.get('val_loss', np.nan)
+        print(f"Epoch {trainer.current_epoch:>5}: Train Loss = {train_loss_epoch:>7.3f}, Val Loss = {val_loss:>7.3f}")
+
+    def on_test_start(self, trainer, pl_module):
+        print("Starting testing...")
+
+    def on_test_epoch_end(self, trainer, pl_module):
+        print("Testing complete.")
+
+    def on_predict_start(self, trainer, pl_module):
+        print("Starting prediction...")
+
+    def on_predict_epoch_end(self, trainer, pl_module, outputs):
+        print("Prediction complete.")
