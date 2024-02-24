@@ -5,4 +5,6 @@ This directory contains example notebooks that show how to use various aspects o
 | Notebook                                                         | Purpose                                                                                                                               |
 |------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------|
 | [generate_rosetta_dataset.ipynb](generate_rosetta_dataset.ipynb) | Generate a Rosetta pretraining dataset using molecular simulations data obtained from the [rosettafy](https://github.com) repository. |
-| [split_dataset.ipynb](split_dataset.ipynb)                       | Create train, validation, and test splits for experimental datasets.                                                                  |
+| [train_test_split.ipynb](train_test_split.ipynb)                 | Create train, validation, and test splits for experimental datasets.                                                                  |
+| [pretraining.ipynb](pretraining.ipynb)                           | Pretrain METL models with Rosetta data.                                                                                               |
+| [finetuning.ipynb](finetuning.ipynb)                             | Finetune METL models with experimental data.                                                                                          |
