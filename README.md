@@ -3,11 +3,11 @@ This repository contains the Mutational Effect Transfer Learning (METL) framewor
 You can use it to train models on your own data or recreate the results from our manuscript.
 This framework uses [PyTorch Lightning](https://lightning.ai/docs/pytorch/stable/). 
 
-- To access pretrained METL models in pure PyTorch with minimal software dependencies, see our [metl-pretrained](url) repository.
-- To recreate the results from our preprint, see our [metl-pub](url) repository.
-- To run your own molecular simulations, see our [rosettafy](url) repository.
+- To access pretrained METL models in pure PyTorch with minimal software dependencies, see our [metl-pretrained](https://github.com/gitter-lab/metl-pretrained) repository.
+- To recreate the results from our preprint, see our [metl-pub](https://github.com/gitter-lab/metl-pub) repository.
+- To run your own molecular simulations, see our [metl-sim](https://github.com/gitter-lab/metl-sim) repository.
 
-For more information, please see our [preprint](url).
+For more information, please see our [preprint]().
 
 # Installation
 
@@ -45,11 +45,11 @@ python code/train_source_mode.py @args/pretrain_avgfp_local.txt --max_epochs 5 -
 
 Experimental data is stored in [dms_data](data/dms_data) directory. 
 For demonstration purposes, this repository contains the avGFP experimental dataset from [Sarkisyan et al. (2016)](https://doi.org/10.1038/nature17995). 
-See the [metl-pub](url) repository to access the other experimental datasets we used in our preprint.
+See the [metl-pub](https://github.com/gitter-lab/metl-pub) repository to access the other experimental datasets we used in our preprint.
 See the README in the [dms_data](data/dms_data) directory for information about how to use your own experimental dataset. 
 
 In addition to experimental data, you will need a pretrained METL model to finetune.
-You can pretrain METL models yourself using this repository, or you can use our pretrained METL models from the [metl-pretrained](url) repository. 
+You can pretrain METL models yourself using this repository, or you can use our pretrained METL models from the [metl-pretrained](https://github.com/gitter-lab/metl-pretrained) repository. 
 
 Once you have a pretrained METL model and an experimental dataset, you can finetune the model using [train_target_model.py](code/train_target_model.py).
 The notebook [finetuning.ipynb](notebooks/finetuning.ipynb) shows a complete example of how to finetune a METL model using the sample avGFP dataset.
