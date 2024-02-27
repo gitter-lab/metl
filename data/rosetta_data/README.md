@@ -21,7 +21,7 @@ A database acquired from the [metl-sim](https://github.com/gitter-lab/metl-sim) 
 3. Compute standardization parameters from the train set using [compute_rosetta_standardization.py](../../code/compute_standardization.py). The standardization parameters are needed during training and evaluation to standardize the various Rosetta energies so that they are on similar scales with mean 0 and standard deviation 1.
 4. Make sure all PDB files in the Rosetta dataset are listed in [pdb_index.csv](pdb_index.csv).
 
-See the notebook [generate_rosetta_dataset.ipynb](../notebooks/generate_rosetta_dataset.ipynb) for a complete example of how perform the above steps. 
+See the notebook [generate_rosetta_dataset.ipynb](../../notebooks/generate_rosetta_dataset.ipynb) for a complete example of how perform the above steps. 
 This example uses the sample database [avgfp_rosettafy_sample.db](avgfp_rosettafy_sample.db) to generate a processed Rosetta dataset, which is also provided here in the [avgfp](avgfp) directory.  
 
 
