@@ -7,7 +7,12 @@ This framework uses [PyTorch Lightning](https://lightning.ai/docs/pytorch/stable
 - To recreate the results from our preprint, see our [metl-pub](https://github.com/gitter-lab/metl-pub) repository.
 - To run your own molecular simulations, see our [metl-sim](https://github.com/gitter-lab/metl-sim) repository.
 
-For more information, please see our [preprint]().
+For more information, please see our manuscript:
+
+**Biophysics-based protein language models for protein engineering**.  
+Sam Gelman, Bryce Johnson, Chase Freschlin, Sameer D'Costa, Anthony Gitter<sup>+</sup>, Philip A Romero<sup>+</sup>.  
+*bioRxiv*, 2024.  
+<sup>+</sup> denotes equal contribution.
 
 # Installation
 
@@ -53,7 +58,3 @@ You can pretrain METL models yourself using this repository, or you can use our 
 
 Once you have a pretrained METL model and an experimental dataset, you can finetune the model using [train_target_model.py](code/train_target_model.py).
 The notebook [finetuning.ipynb](notebooks/finetuning.ipynb) shows a complete example of how to finetune a METL model using the sample avGFP dataset.
-
-# Additional information
-
-Training baseline models, etc.
