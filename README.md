@@ -1,5 +1,5 @@
 # Mutational Effect Transfer Learning
-[![DOI](https://zenodo.org/badge/755259601.svg)](https://zenodo.org/doi/10.5281/zenodo.10819483)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.10819483.svg)](https://zenodo.org/doi/10.5281/zenodo.10819483)
 
 This repository contains the Mutational Effect Transfer Learning (METL) framework for pretraining and finetuning biophysics-informed protein language models. 
 You can use it to train models on your own data or recreate the results from our manuscript.
