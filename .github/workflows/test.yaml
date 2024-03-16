@@ -41,3 +41,7 @@ jobs:
     - name: Finetune target METL model
       shell: bash --login {0}
       run: python code/train_target_model.py @args/finetune_avgfp_local.txt --enable_progress_bar false --enable_simple_progress_messages --max_epochs 50 --unfreeze_backbone_at_epoch 25
+    # Load target model checkpoint and run inference on example variants
+    - name: Load and test target METL model
+      shell: bash --login {0}
+      run: python code/tests.py --checkpoint_path output/training_logs/DgLkMZxu/checkpoints/epoch=49-step=50.ckpt --variants E3K,G102S;T36P,S203T,K207R;V10A,D19G,F25S,E113V --dataset avgfp
