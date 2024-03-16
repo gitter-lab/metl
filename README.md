@@ -39,20 +39,20 @@ The notebook [pretraining.ipynb](notebooks/pretraining.ipynb) shows a complete e
 You can run the pretraining script on the sample dataset using the following command:
 
 ```bash
-python code/train_source_mode.py @args/pretrain_avgfp_local.txt
+python code/train_source_model.py @args/pretrain_avgfp_local.txt
 ```
 
 Note this might take a while to train, so for demonstration purposes, you may want to limit the number of epochs and amount of data using the following:
 
 ```bash
-python code/train_source_mode.py @args/pretrain_avgfp_local.txt --max_epochs 5 --limit_train_batches 5 --limit_val_batches 5 --limit_test_batches 5
+python code/train_source_model.py @args/pretrain_avgfp_local.txt --max_epochs 5 --limit_train_batches 5 --limit_val_batches 5 --limit_test_batches 5
 ```
 
 # Finetuning on experimental data
 
 Experimental data is stored in [dms_data](data/dms_data) directory. 
 For demonstration purposes, this repository contains the avGFP experimental dataset from [Sarkisyan et al. (2016)](https://doi.org/10.1038/nature17995). 
-See the [metl-pub](https://github.com/gitter-lab/metl-pub) repository to access the other experimental datasets we used in our preprint.
+See the [metl-pub](https://github.com/gitter-lab/metl-pub) repository to access the other experimental datasets we used in our manuscript.
 See the README in the [dms_data](data/dms_data) directory for information about how to use your own experimental dataset. 
 
 In addition to experimental data, you will need a pretrained METL model to finetune.
