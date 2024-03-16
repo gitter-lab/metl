@@ -30,6 +30,10 @@ jobs:
         miniforge-variant: Mambaforge
         miniforge-version: 'latest'
         use-mamba: true
+      # Installs latest commit from main branch
+    - name: Install metl package from metl-pretrained repo
+      shell: bash --login {0}
+      run: pip install git+https://github.com/gitter-lab/metl-pretrained
     # Log conda environment contents
     - name: Log conda environment
       shell: bash --login {0}
