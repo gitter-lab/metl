@@ -9,6 +9,7 @@ jobs:
     name: Test METL training
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
         # Could also test on the beta M1 macOS runner
         # https://docs.github.com/en/actions/using-github-hosted-runners/about-github-hosted-runners/about-github-hosted-runners#standard-github-hosted-runners-for-public-repositories
