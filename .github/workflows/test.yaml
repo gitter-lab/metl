@@ -1,0 +1,66 @@
+name: Tests
+on:
+- push
+- pull_request
+
+jobs:
+  # Installs the conda environment but does not run tests
+  conda-only:
+    name: Test conda environment
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        # Could also test on the beta M1 macOS runner
+        # https://docs.github.com/en/actions/using-github-hosted-runners/about-github-hosted-runners/about-github-hosted-runners#standard-github-hosted-runners-for-public-repositories
+        os:
+        - macos-latest
+        - windows-latest
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      # Can set up package caching later conda-incubator/setup-miniconda
+    - name: Install conda environment
+      uses: conda-incubator/setup-miniconda@v2
+      with:
+        activate-environment: metl
+        environment-file: environment.yml
+        auto-activate-base: false
+        miniforge-variant: Mambaforge
+        miniforge-version: 'latest'
+        use-mamba: true
+    # Log conda environment contents
+    - name: Log conda environment
+      shell: bash --login {0}
+      run: conda list
+
+  # Installs the conda environment and trains METL
+  train:
+    name: Test METL training
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        # Could also test on the beta M1 macOS runner
+        # https://docs.github.com/en/actions/using-github-hosted-runners/about-github-hosted-runners/about-github-hosted-runners#standard-github-hosted-runners-for-public-repositories
+        os:
+        - ubuntu-latest
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      # Can set up package caching later conda-incubator/setup-miniconda
+    - name: Install conda environment
+      uses: conda-incubator/setup-miniconda@v2
+      with:
+        activate-environment: metl
+        environment-file: environment.yml
+        auto-activate-base: false
+        miniforge-variant: Mambaforge
+        miniforge-version: 'latest'
+        use-mamba: true
+    # Log conda environment contents
+    - name: Log conda environment
+      shell: bash --login {0}
+      run: conda list
+    # Log conda environment contents
+    - name: Log conda environment
+      shell: bash --login {0}
+      run: python code/train_source_model.py @args/pretrain_avgfp_local.txt --max_epochs 5 --limit_train_batches 5 --limit_val_batches 5 --limit_test_batches 5
