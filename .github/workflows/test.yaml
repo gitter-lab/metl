@@ -9,6 +9,7 @@ jobs:
     name: Test conda environment
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
         # Could also test on the beta M1 macOS runner
         # https://docs.github.com/en/actions/using-github-hosted-runners/about-github-hosted-runners/about-github-hosted-runners#standard-github-hosted-runners-for-public-repositories
@@ -60,7 +61,11 @@ jobs:
     - name: Log conda environment
       shell: bash --login {0}
       run: conda list
-    # Log conda environment contents
+    # Pretrain source model on GFP Rosetta dataset
     - name: Log conda environment
       shell: bash --login {0}
       run: python code/train_source_model.py @args/pretrain_avgfp_local.txt --max_epochs 5 --limit_train_batches 5 --limit_val_batches 5 --limit_test_batches 5
+    # Finetune target model on GFP DMS dataset
+    - name: Log conda environment
+      shell: bash --login {0}
+      run: python code/train_target_model.py @args/finetune_avgfp_local.txt --enable_progress_bar false --enable_simple_progress_messages --max_epochs 50 --unfreeze_backbone_at_epoch 25
