@@ -1,4 +1,5 @@
 # Mutational Effect Transfer Learning
+[![GitHub Actions](https://github.com/gitter-lab/metl/actions/workflows/test.yaml/badge.svg)](https://github.com/gitter-lab/metl/actions/workflows/test.yaml)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.10819483.svg)](https://zenodo.org/doi/10.5281/zenodo.10819483)
 
 This repository contains the Mutational Effect Transfer Learning (METL) framework for pretraining and finetuning biophysics-informed protein language models. 
@@ -25,6 +26,7 @@ conda activate metl
 ```
 
 For GPU support, make sure you have the appropriate CUDA version installed.
+Add `cudatoolkit` to the `environment.yml` file before creating the conda environment.
 
 
 # Pretraining on Rosetta data
@@ -48,6 +50,9 @@ Note this might take a while to train, so for demonstration purposes, you may wa
 python code/train_source_model.py @args/pretrain_avgfp_local.txt --max_epochs 5 --limit_train_batches 5 --limit_val_batches 5 --limit_test_batches 5
 ```
 
+The test metrics are expected to show poor performance after such a short training run.
+For instance, `pearson_total_score` may be around 0.24.
+
 # Finetuning on experimental data
 
 Experimental data is stored in [dms_data](data/dms_data) directory. 
@@ -60,3 +65,9 @@ You can pretrain METL models yourself using this repository, or you can use our 
 
 Once you have a pretrained METL model and an experimental dataset, you can finetune the model using [train_target_model.py](code/train_target_model.py).
 The notebook [finetuning.ipynb](notebooks/finetuning.ipynb) shows a complete example of how to finetune a METL model using the sample avGFP dataset.
+For demonstration purposes, it uses the command:
+```bash
+python code/train_target_model.py @args/finetune_avgfp_local.txt --enable_progress_bar false --enable_simple_progress_messages --max_epochs 50 --unfreeze_backbone_at_epoch 25
+```
+
+Following the short demonstration pretraining and finetuning process is expected to give test set Spearman correlation around 0.6.
