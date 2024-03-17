@@ -15,7 +15,7 @@ def load_checkpoint_run_inference(checkpoint_path, variants, dataset):
     wt = datasets[dataset]["wt_aa"]
     pdb_fn = datasets[dataset]["pdb_fn"]
 
-    variants = variants.split(";")
+    variants = variants.split("_")
 
     encoded_variants = data_encoder.encode_variants(wt, variants)
 
@@ -37,7 +37,7 @@ if __name__ == "__main__":
                         help="path to saved METL target model",
                         type=str)
     parser.add_argument("--variants",
-                        help="semicolon-separated list of variants to score",
+                        help="underscore-separated list of variants to score",
                         type=str)
     parser.add_argument("--dataset",
                         help="protein dataset to load to obtain sequence and structure",

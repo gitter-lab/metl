@@ -54,4 +54,4 @@ jobs:
         cp=output/training_logs/*/checkpoints/epoch=49-step=50.ckpt
         python code/convert_ckpt.py --ckpt_path $cp
         cp=output/training_logs/*/checkpoints/*.pt
-        python code/tests.py --ckpt_path $cp --variants E3K,G102S;T36P,S203T,K207R;V10A,D19G,F25S,E113V --dataset avgfp
+        python code/tests.py --ckpt_path $cp --variants E3K,G102S_T36P,S203T,K207R_V10A,D19G,F25S,E113V --dataset avgfp
