@@ -36,7 +36,7 @@ dependencies:
   - pyqt=5.15.7
   - sqlalchemy=1.4.43
   - aenum=3.1.11
-  - connectorx=0.3.0
+  - connectorx=0.3.2
   - configargparse=1.5.3
   - torchinfo=1.8.0
   - biopython=1.83
