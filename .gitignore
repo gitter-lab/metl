@@ -1,3 +1,7 @@
+# Output files
+output/*
+!output/README.md
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

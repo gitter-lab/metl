@@ -1,5 +1,4 @@
 """ testing code """
-import argparse
 import metl
 import torch
 import utils
@@ -46,4 +45,4 @@ if __name__ == "__main__":
 
     parsed_args = parser.parse_args()
 
-    load_checkpoint_run_inference(args.checkpoint_path, args.variants, args.dataset)
+    load_checkpoint_run_inference(parsed_args.checkpoint_path, parsed_args.variants, parsed_args.dataset)

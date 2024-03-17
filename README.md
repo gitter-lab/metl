@@ -53,6 +53,11 @@ python code/train_source_model.py @args/pretrain_avgfp_local.txt --max_epochs 5 
 The test metrics are expected to show poor performance after such a short training run.
 For instance, `pearson_total_score` may be around 0.24.
 
+See the help message for an explanation of all the arguments
+```bash
+python code/train_source_model.py --help
+```
+
 # Finetuning on experimental data
 
 Experimental data is stored in [dms_data](data/dms_data) directory. 
@@ -71,3 +76,8 @@ python code/train_target_model.py @args/finetune_avgfp_local.txt --enable_progre
 ```
 
 Following the short demonstration pretraining and finetuning process is expected to give test set Spearman correlation around 0.6.
+
+See the help message for an explanation of all the arguments
+```bash
+python code/code/train_target_model.py --help
+```
