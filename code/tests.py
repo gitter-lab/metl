@@ -33,7 +33,7 @@ def load_checkpoint_run_inference(checkpoint_path, variants, dataset):
 if __name__ == "__main__":
     parser = ArgumentParser(add_help=True)
 
-    parser.add_argument("--checkpoint_path",
+    parser.add_argument("--ckpt_path",
                         help="path to saved METL target model",
                         type=str)
     parser.add_argument("--variants",
@@ -45,4 +45,4 @@ if __name__ == "__main__":
 
     parsed_args = parser.parse_args()
 
-    load_checkpoint_run_inference(parsed_args.checkpoint_path, parsed_args.variants, parsed_args.dataset)
+    load_checkpoint_run_inference(parsed_args.ckpt_path, parsed_args.variants, parsed_args.dataset)
