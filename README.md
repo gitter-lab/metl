@@ -25,6 +25,8 @@ conda env create -f environment.yml
 conda activate metl
 ```
 
+Installation typically takes approximately 5 minutes. 
+
 For GPU support, make sure you have the appropriate CUDA version installed.
 Add `cudatoolkit` to the `environment.yml` file before creating the conda environment.
 
@@ -53,6 +55,8 @@ python code/train_source_model.py @args/pretrain_avgfp_local.txt --max_epochs 5 
 The test metrics are expected to show poor performance after such a short training run.
 For instance, `pearson_total_score` may be around 0.24.
 
+Running the limited pretraining demo takes approximately 5 minutes on CPU.
+
 See the help message for an explanation of all the arguments
 ```bash
 python code/train_source_model.py --help
@@ -76,6 +80,8 @@ python code/train_target_model.py @args/finetune_avgfp_local.txt --enable_progre
 ```
 
 Following the short demonstration pretraining and finetuning process is expected to give test set Spearman correlation around 0.6.
+
+Running the finetuning demo takes approximately 7 minutes on CPU.
 
 See the help message for an explanation of all the arguments
 ```bash
