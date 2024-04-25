@@ -7,7 +7,7 @@ You can use it to train models on your own data or recreate the results from our
 This framework uses [PyTorch Lightning](https://lightning.ai/docs/pytorch/stable/). 
 
 - To run our pretrained METL [models](https://zenodo.org/doi/10.5281/zenodo.11051644) in pure PyTorch with minimal software dependencies, see our [metl-pretrained](https://github.com/gitter-lab/metl-pretrained) repository.
-- To recreate the results from our preprint, see our [metl-pub](https://github.com/gitter-lab/metl-pub) repository.
+- To recreate the results from our preprint, see our [metl-pub](https://github.com/gitter-lab/metl-pub) repository and Zenodo [datasets](https://zenodo.org/doi/10.5281/zenodo.10967412).
 - To run your own molecular simulations, see our [metl-sim](https://github.com/gitter-lab/metl-sim) repository.
 
 For more information, please see our manuscript:
