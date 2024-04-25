@@ -6,7 +6,7 @@ This repository contains the Mutational Effect Transfer Learning (METL) framewor
 You can use it to train models on your own data or recreate the results from our manuscript.
 This framework uses [PyTorch Lightning](https://lightning.ai/docs/pytorch/stable/). 
 
-- To access pretrained METL models in pure PyTorch with minimal software dependencies, see our [metl-pretrained](https://github.com/gitter-lab/metl-pretrained) repository.
+- To run our pretrained METL [models](https://zenodo.org/doi/10.5281/zenodo.11051644) in pure PyTorch with minimal software dependencies, see our [metl-pretrained](https://github.com/gitter-lab/metl-pretrained) repository.
 - To recreate the results from our preprint, see our [metl-pub](https://github.com/gitter-lab/metl-pub) repository.
 - To run your own molecular simulations, see our [metl-sim](https://github.com/gitter-lab/metl-sim) repository.
 
