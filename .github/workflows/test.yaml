@@ -13,10 +13,12 @@ jobs:
       matrix:
         # Could also test on the beta M1 macOS runner
         # https://docs.github.com/en/actions/using-github-hosted-runners/about-github-hosted-runners/about-github-hosted-runners#standard-github-hosted-runners-for-public-repositories
+        # Disabled testing on Windows because there were too many Windows-specific PyTorch training issues
+        # Re-enable and debug these if there is user demand for Windows
         os:
         - macos-latest
         - ubuntu-latest
-        - windows-latest
+        # - windows-latest
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
