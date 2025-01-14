@@ -31,7 +31,7 @@ jobs:
         auto-activate-base: false
         miniforge-version: 'latest'
         use-mamba: true
-        architecture: 'x86'
+        architecture: 'x64'
       # Installs latest commit from main branch
     - name: Install metl package from metl-pretrained repo
       shell: bash --login {0}
