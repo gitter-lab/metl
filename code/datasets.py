@@ -10,9 +10,9 @@ import torch
 import torch.utils.data
 from torch import Tensor
 
-import constants
-import split_dataset as sd
-import encode as enc
+from . import constants
+from . import split_dataset as sd
+from . import encode as enc
 
 
 def load_standardization_params(split_dir, train_only=True):

@@ -11,7 +11,7 @@ import yaml
 from Bio import PDB
 from Bio.PDB.PDBParser import PDBParser
 
-import constants
+from . import constants
 
 
 def mkdir(d):
@@ -81,13 +81,14 @@ def load_dataset_metadata(metadata_fn: str = "data/dms_data/datasets.yml"):
 def load_dataset(ds_name: Optional[str] = None,
                  ds_fn: Optional[str] = None,
                  sort_mutations: bool = False,
-                 load_epistasis: bool = False):
+                 load_epistasis: bool = False,
+                 metadata_fn: str = "data/dms_data/datasets.yml"):
     """ load a dataset as pandas dataframe """
     if ds_name is None and ds_fn is None:
         raise ValueError("must provide either ds_name or ds_fn to load a dataset")
 
     if ds_fn is None:
-        datasets = load_dataset_metadata()
+        datasets = load_dataset_metadata(metadata_fn)
         ds_fn = datasets[ds_name]["ds_fn"]
 
     if not isfile(ds_fn):

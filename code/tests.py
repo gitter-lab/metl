@@ -1,10 +1,9 @@
 """ testing code """
 import metl
 import torch
-import utils
-
 from argparse import ArgumentParser
 
+from . import utils
 
 def load_checkpoint_run_inference(checkpoint_path, variants, dataset):
     """ loads a finetuned 3D model from a checkpoint and scores variants with the model """

@@ -23,9 +23,9 @@ from scipy.stats import pearsonr, spearmanr
 from torch import optim, Tensor
 from torch.optim.lr_scheduler import LambdaLR
 
-import utils
-import datamodules
-from metrics import compute_metrics
+from . import utils
+from . import datamodules
+from .metrics import compute_metrics
 
 
 def save_scatterplots(dm, predictions_d, log_dir, suffix=""):

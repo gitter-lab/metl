@@ -7,9 +7,9 @@ from typing import Optional, Union, Sequence, Literal
 import numpy as np
 import pandas as pd
 
-import rosetta_data_utils as rd
-import constants
-import utils
+from . import rosetta_data_utils as rd
+from . import constants
+from . import utils
 
 
 def is_seq_level_encoding(encoding: str):

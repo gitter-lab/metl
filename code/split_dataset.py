@@ -13,7 +13,7 @@ import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split
 
-import utils
+from . import utils
 
 
 logger = logging.getLogger("METL." + __name__)

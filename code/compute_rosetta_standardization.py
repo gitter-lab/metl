@@ -7,7 +7,7 @@ import argparse
 import logging
 
 import pandas as pd
-import split_dataset as sd
+from . import split_dataset as sd
 
 logger = logging.getLogger("METL." + __name__)
 logger.setLevel(logging.DEBUG)

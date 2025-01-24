@@ -15,13 +15,13 @@ import torch.utils.data as data_utils
 from torch.utils.data import DataLoader
 import pytorch_lightning as pl
 
-import datasets
-import pdb_sampler
-import utils
-import constants
-import split_dataset as sd
-import encode as enc
-from datasets import RosettaDatasetSQL
+from . import datasets
+from . import pdb_sampler
+from . import utils
+from . import constants
+from . import split_dataset as sd
+from . import encode as enc
+from .datasets import RosettaDatasetSQL
 
 
 class DMSDataModule(pl.LightningDataModule):

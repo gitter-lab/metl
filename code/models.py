@@ -12,8 +12,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
 
-import relative_attention as ra
-import tasks
+from . import relative_attention as ra
+from . import tasks
 
 
 def reset_parameters_helper(m: nn.Module):

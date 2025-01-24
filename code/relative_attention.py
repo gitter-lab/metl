@@ -16,10 +16,10 @@ import torch.nn.functional as F
 from torch import Tensor
 from torch.nn import Linear, Dropout, LayerNorm
 import time
-
-import structure
 import networkx as nx
-import models
+
+from . import structure
+from . import models
 
 
 class RelativePosition3D(nn.Module):
