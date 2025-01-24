@@ -9,7 +9,7 @@ import pandas as pd
 import utils
 
 
-def sort_and_save_to_csv(df, out_fn, precision=7, sort_muts=True, sort_variants=True):
+def sort_and_save_to_csv(df, out_fn, precision=7, sort_muts=True, sort_variants=True, na_rep=""):
     # make sure variants have their list of mutations in sorted order
     if sort_muts:
         df["variant"] = utils.sort_variant_mutations(df["variant"])
@@ -24,7 +24,7 @@ def sort_and_save_to_csv(df, out_fn, precision=7, sort_muts=True, sort_variants=
     if not isdir(dirname(out_fn)):
         os.makedirs(dirname(out_fn))
 
-    df.to_csv(out_fn, sep="\t", float_format=float_format.format, index=False)
+    df.to_csv(out_fn, sep="\t", float_format=float_format.format, index=False, na_rep=na_rep)
 
 
 def parse_avgfp(score_precision=7):
