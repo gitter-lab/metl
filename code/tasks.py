@@ -10,9 +10,14 @@ import torch.nn.functional as F
 import pytorch_lightning as pl
 import torchmetrics
 
-from . import training_utils
-from .training_utils import CosineWarmupScheduler, ConstantWarmupScheduler
-from . import models
+try:
+    from . import training_utils
+    from .training_utils import CosineWarmupScheduler, ConstantWarmupScheduler
+    from . import models
+except ImportError:
+    import training_utils
+    from training_utils import CosineWarmupScheduler, ConstantWarmupScheduler
+    import models
 
 
 class RosettaTask(pl.LightningModule):

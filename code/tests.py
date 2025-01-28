@@ -1,13 +1,16 @@
 """ testing code """
-import metl
+import code
 import torch
 from argparse import ArgumentParser
 
-from . import utils
+try:
+    from . import utils
+except ImportError:
+    import utils
 
 def load_checkpoint_run_inference(checkpoint_path, variants, dataset):
     """ loads a finetuned 3D model from a checkpoint and scores variants with the model """
-    model, data_encoder = metl.get_from_checkpoint(checkpoint_path)
+    model, data_encoder = code.get_from_checkpoint(checkpoint_path)
 
     # load the wild-type sequence and the PDB file (needed for 3D RPE) for the dataset
     datasets = utils.load_dataset_metadata()

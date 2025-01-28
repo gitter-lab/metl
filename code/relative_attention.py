@@ -18,9 +18,12 @@ from torch.nn import Linear, Dropout, LayerNorm
 import time
 import networkx as nx
 
-from . import structure
-from . import models
-
+try:
+    from . import structure
+    from . import models
+except ImportError:
+    import structure
+    import models
 
 class RelativePosition3D(nn.Module):
     """ Contact map-based relative position embeddings """

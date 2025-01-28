@@ -7,10 +7,14 @@ from typing import Optional, Union, Sequence, Literal
 import numpy as np
 import pandas as pd
 
-from . import rosetta_data_utils as rd
-from . import constants
-from . import utils
-
+try:
+    from . import rosetta_data_utils as rd
+    from . import constants
+    from . import utils
+except ImportError:
+    import rosetta_data_utils as rd
+    import constants
+    import utils
 
 def is_seq_level_encoding(encoding: str):
     """ helper function to differentiate sequence-level vs. residue-level encodings """

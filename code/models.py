@@ -12,9 +12,12 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
 
-from . import relative_attention as ra
-from . import tasks
-
+try:
+    from . import relative_attention as ra
+    from . import tasks
+except ImportError:
+    import relative_attention as ra
+    import tasks
 
 def reset_parameters_helper(m: nn.Module):
     """ helper function for resetting model parameters, meant to be used with model.apply() """

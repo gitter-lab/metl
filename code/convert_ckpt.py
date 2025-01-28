@@ -13,9 +13,14 @@ import torch
 import torch.nn as nn
 import torchinfo
 
-from . import models
-from . import utils
-from . import encode as enc
+try:
+    from . import models
+    from . import utils
+    from . import encode as enc
+except ImportError:
+    import models
+    import utils
+    import encode as enc
 
 
 def convert_checkpoint(ckpt_dict):

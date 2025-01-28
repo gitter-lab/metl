@@ -15,14 +15,24 @@ from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint, TQDMProg
     LearningRateMonitor, Checkpoint, StochasticWeightAveraging, ModelSummary, RichProgressBar, RichModelSummary
 import numpy as np
 
-from . import models
-from . import training_utils
-from . import utils
-from .datamodules import DMSDataModule
-from . import finetuning_callbacks
-from .finetuning_callbacks import AnyFinetuning
-from .tasks import DMSTask
-from . import analysis_utils as an
+try:
+    from . import models
+    from . import training_utils
+    from . import utils
+    from .datamodules import DMSDataModule
+    from . import finetuning_callbacks
+    from .finetuning_callbacks import AnyFinetuning
+    from .tasks import DMSTask
+    from . import analysis_utils as an
+except ImportError:
+    import models
+    import training_utils
+    import utils
+    from datamodules import DMSDataModule
+    import finetuning_callbacks
+    from finetuning_callbacks import AnyFinetuning
+    from tasks import DMSTask
+    import analysis_utils as an
 
 logging.basicConfig(level=logging.INFO)
 

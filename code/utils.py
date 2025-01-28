@@ -11,8 +11,10 @@ import yaml
 from Bio import PDB
 from Bio.PDB.PDBParser import PDBParser
 
-from . import constants
-
+try:
+    from . import constants
+except ImportError:
+    import constants
 
 def mkdir(d):
     """ creates given dir if it does not already exist """

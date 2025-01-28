@@ -3,7 +3,10 @@
 import pandas as pd
 import sqlalchemy as sqla
 
-from . import utils
+try:
+    from . import utils
+except ImportError:
+    import utils
 
 
 def convert_dms_to_rosettafy_indexing(ds_name, variants, reverse=False):

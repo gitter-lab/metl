@@ -10,10 +10,14 @@ import torch
 import torch.utils.data
 from torch import Tensor
 
-from . import constants
-from . import split_dataset as sd
-from . import encode as enc
-
+try:
+    from . import constants
+    from . import split_dataset as sd
+    from . import encode as enc
+except ImportError:
+    import constants
+    import split_dataset as sd
+    import encode as enc
 
 def load_standardization_params(split_dir, train_only=True):
     # if train_only True, then will only load standardization params for the training set (filename energy_X_train)

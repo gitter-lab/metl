@@ -16,11 +16,18 @@ import pytorch_lightning.accelerators
 
 import wandb
 
-from . import utils
-from .training_utils import BestMetricLogger, save_metrics_ptl, CondorStopping, create_log_dir, get_next_version
-from .datamodules import RosettaDataModule
-from . import models
-from . import tasks
+try:
+    from . import utils
+    from .training_utils import BestMetricLogger, save_metrics_ptl, CondorStopping, create_log_dir, get_next_version
+    from .datamodules import RosettaDataModule
+    from . import models
+    from . import tasks
+except ImportError:
+    import utils
+    from training_utils import BestMetricLogger, save_metrics_ptl, CondorStopping, create_log_dir, get_next_version
+    from datamodules import RosettaDataModule
+    import models
+    import tasks
 
 
 class ModelCheckpoint(pytorch_lightning.callbacks.ModelCheckpoint):

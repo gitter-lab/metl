@@ -7,7 +7,10 @@ from scipy.spatial.distance import cdist
 import networkx as nx
 from biopandas.pdb import PandasPdb
 
-from . import utils
+try:
+    from . import utils
+except ImportError:
+    import utils
 
 
 class GraphType(Enum):

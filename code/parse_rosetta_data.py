@@ -15,9 +15,14 @@ from pandas.io.sql import SQLiteDatabase, SQLiteTable
 import sqlite3
 from tqdm import tqdm
 
-from . import constants
-from . import utils
-from . import rosetta_data_utils as rd
+try:
+    from . import constants
+    from . import utils
+    from . import rosetta_data_utils as rd
+except ImportError:
+    import constants
+    import utils
+    import rosetta_data_utils as rd
 
 logger = logging.getLogger("METL." + __name__)
 logger.setLevel(logging.DEBUG)

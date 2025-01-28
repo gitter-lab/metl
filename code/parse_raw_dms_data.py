@@ -6,7 +6,10 @@ import argparse
 import numpy as np
 import pandas as pd
 
-from . import utils
+try:
+    from . import utils
+except ImportError:
+    import utils
 
 
 def sort_and_save_to_csv(df, out_fn, precision=7, sort_muts=True, sort_variants=True, na_rep=""):
