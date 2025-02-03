@@ -71,7 +71,34 @@ def sort_variants(variants):
     return sv
 
 
-def load_dataset_metadata(metadata_fn: str = "data/dms_data/datasets.yml"):
+def get_config():
+    """ loads config.yaml from the path specified in the environment variable. """
+    config_path = os.getenv("CONFIG_PATH")
+
+    if config_path and os.path.exists(config_path):
+        with open(config_path, "r") as f:
+            return yaml.safe_load(f)
+
+    # if the environment variable is not set, check the default location
+    # which is just the current working directory
+    if isfile("config.yml"):
+        with open("config.yml", "r") as f:
+            return yaml.safe_load(f)
+
+    # return empty dict if config.yaml is missing
+    return {}
+
+
+def load_dataset_metadata(metadata_fn: Optional[str] = None):
+
+    # for compatability with old code which defined this as a constant
+    legacy_default = "data/dms_data/datasets.yml"
+
+    # new way is to define this in the config.yaml
+    if metadata_fn is None:
+        config = get_config()
+        metadata_fn = config.get("dataset_metadata", legacy_default)
+
     with open(metadata_fn, "r") as stream:
         try:
             datasets = yaml.safe_load(stream)
@@ -83,14 +110,14 @@ def load_dataset_metadata(metadata_fn: str = "data/dms_data/datasets.yml"):
 def load_dataset(ds_name: Optional[str] = None,
                  ds_fn: Optional[str] = None,
                  sort_mutations: bool = False,
-                 load_epistasis: bool = False,
-                 metadata_fn: str = "data/dms_data/datasets.yml"):
+                 load_epistasis: bool = False):
+
     """ load a dataset as pandas dataframe """
     if ds_name is None and ds_fn is None:
         raise ValueError("must provide either ds_name or ds_fn to load a dataset")
 
     if ds_fn is None:
-        datasets = load_dataset_metadata(metadata_fn)
+        datasets = load_dataset_metadata()
         ds_fn = datasets[ds_name]["ds_fn"]
 
     if not isfile(ds_fn):
