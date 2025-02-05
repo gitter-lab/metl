@@ -23,15 +23,29 @@ logger = logging.getLogger("METL." + __name__)
 logger.setLevel(logging.DEBUG)
 
 
-def supertest(ds, size=.1, rseed=8, out_dir=None, overwrite=False):
+def supertest(
+        ds,
+        size=.1,
+        rseed=8,
+        use_dataframe_index=False,
+        out_dir=None,
+        overwrite=False,
+        name=None,
+):
     """ create a supertest split, meant to be completely held out data until final evaluation """
     np.random.seed(rseed)
-    idxs = np.arange(0, ds.shape[0])
+    if use_dataframe_index:
+        idxs = np.array(ds.index)
+    else:
+        idxs = np.arange(0, ds.shape[0])
     idxs, super_test_idxs = train_test_split(idxs, test_size=size)
     save_fn = None
     if out_dir is not None:
         utils.mkdir(out_dir)
-        out_fn = "supertest_w{}_s{}_r{}.txt".format(hash_withhold(super_test_idxs), size, rseed)
+        if name is not None:
+            out_fn = "supertest_w{}_s{}_r{}_{}.txt".format(hash_withhold(super_test_idxs), size, rseed, name)
+        else:
+            out_fn = "supertest_w{}_s{}_r{}.txt".format(hash_withhold(super_test_idxs), size, rseed)
         save_fn = join(out_dir, out_fn)
         if isfile(save_fn) and not overwrite:
             raise FileExistsError("supertest split already exists: {}".format(join(out_dir, out_fn)))
@@ -61,8 +75,19 @@ def hash_withhold(withheld_idxs, length=6):
     return w
 
 
-def train_val_test(ds, train_size=.90, val_size=.1, test_size=0., withhold=None,
-                   rseed=8, singles_only=False, out_dir=None, overwrite=False):
+def train_val_test(
+        ds,
+        train_size=.90,
+        val_size=.1,
+        test_size=0.,
+        withhold=None,
+        rseed=8,
+        singles_only=False,
+        use_dataframe_index=False,
+        out_dir=None,
+        overwrite=False,
+        name=None,
+):
 
     """ split data into train, val, and test sets """
     if train_size + val_size + test_size != 1:
@@ -78,10 +103,16 @@ def train_val_test(ds, train_size=.90, val_size=.1, test_size=0., withhold=None,
     # set up the indices that will get split
 
     # if singles_only is set, filter the indices to only include single mutants
-    if singles_only:
-        idxs = np.where(ds["num_mutations"] == 1)[0]
+    if use_dataframe_index:
+        if singles_only:
+            idxs = np.array(ds[ds["num_mutations"] == 1].index)
+        else:
+            idxs = np.array(ds.index)
     else:
-        idxs = np.arange(0, ds.shape[0])
+        if singles_only:
+            idxs = np.where(ds["num_mutations"] == 1)[0]
+        else:
+            idxs = np.arange(0, ds.shape[0])
 
     # withhold supertest data if specified -- can be either a file specifying idxs or an iterable with idxs
     if withhold is not None:
@@ -116,12 +147,16 @@ def train_val_test(ds, train_size=.90, val_size=.1, test_size=0., withhold=None,
     if out_dir is not None:
         # compute a hash of the withheld indices (if any) in order to support at least some name differentiation
         w = "F" if withhold is None else hash_withhold(split["stest"])
-
+        name = "_" + name if name is not None else ""
         if singles_only:
-            od = "standard-singles_tr{}_tu{}_te{}_w{}_r{}".format(train_size, val_size, test_size, w, rseed)
+            od = "standard-singles_tr{}_tu{}_te{}_w{}_r{}{}".format(
+                train_size, val_size, test_size, w, rseed, name
+            )
             out_dir_split = join(out_dir, od)
         else:
-            od = "standard_tr{}_tu{}_te{}_w{}_r{}".format(train_size, val_size, test_size, w, rseed)
+            od = "standard_tr{}_tu{}_te{}_w{}_r{}{}".format(
+                train_size, val_size, test_size, w, rseed, name
+            )
             out_dir_split = join(out_dir, od)
 
         if isdir(out_dir_split) and not overwrite:
