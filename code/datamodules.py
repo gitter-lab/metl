@@ -376,8 +376,18 @@ class DMSDataModule(pl.LightningDataModule):
         targets = self._standardize(data, self.target_standardize_means, self.target_standardize_stds)
         return targets
 
-    def _get_raw_encoded_variants(self, variants: list[str], concat: bool = True):
-        enc_data = enc.encode(encoding=self.encoding, variants=variants, ds_name=self.ds_name, concat=concat)
+    def _get_raw_encoded_variants(
+            self,
+            variants: list[str],
+            concat: bool = True
+    ):
+        enc_data = enc.encode(
+            encoding=self.encoding,
+            variants=variants,
+            ds_name=self.ds_name,
+            indexing=self.ds_metadata["indexing"] if "indexing" in self.ds_metadata else "0_indexed",
+            concat=concat
+        )
         return enc_data
 
     def get_encoded_variants(self, variants: list[str]):
