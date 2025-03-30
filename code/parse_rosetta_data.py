@@ -495,7 +495,7 @@ if __name__ == "__main__":
                         type=str)
 
     parser.add_argument("--db_fn",
-                        help="path to the variant database created in rosettafy",
+                        help="path to the variant database created in metl-sim",
                         type=str)
 
     parser.add_argument("--keep_num_muts",
