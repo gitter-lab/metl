@@ -1,5 +1,6 @@
 """ general utility functions used throughput codebase """
 import os
+import warnings
 from os.path import isfile, isdir, join
 from typing import Optional, Union
 from io import StringIO
@@ -289,7 +290,7 @@ def get_rosetta_energy_targets(target_group: str = "standard-all",
         if all([tg in base_targets for tg in target_names]):
             return list(target_names)
         else:
-            raise ValueError("some target_names not found in master list")
+            warnings.warn("Some target_names not found in Default base targets, please proceed with caution", category=UserWarning)
     else:
         raise ValueError("target_names should be a list: {}".format(target_names))
 
