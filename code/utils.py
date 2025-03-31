@@ -291,6 +291,7 @@ def get_rosetta_energy_targets(target_group: str = "standard-all",
             return list(target_names)
         else:
             warnings.warn("Some target_names not found in Default base targets, please proceed with caution", category=UserWarning)
+            return list(target_names)
     else:
         raise ValueError("target_names should be a list: {}".format(target_names))
 
