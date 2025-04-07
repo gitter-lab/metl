@@ -124,7 +124,10 @@ def load_dataset(ds_name: Optional[str] = None,
     if not isfile(ds_fn):
         raise FileNotFoundError("can't load dataset, file doesn't exist: {}".format(ds_fn))
 
-    ds = pd.read_csv(ds_fn, sep="\t")
+    if ds_fn.endswith('.csv'):
+        ds = pd.read_csv(ds_fn)
+    else:
+        ds = pd.read_csv(ds_fn, sep="\t")
 
     # ensure variants are in sorted order
     if sort_mutations and "variant" in ds:
