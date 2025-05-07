@@ -2,7 +2,7 @@
 
 from os.path import dirname, join, isdir
 import sqlite3
-from typing import Optional
+from typing import Optional, Any
 
 import numpy as np
 import pandas as pd
@@ -40,14 +40,22 @@ def load_standardization_params(split_dir, train_only=True):
 
 
 class DMSDataset(torch.utils.data.Dataset):
-    """ Dataset for DMS data, in-memory, similar to PyTorch's TensorDataset, but support for PDB fn
-        and dictionary return value """
+    """ Dataset for DMS data, in-memory, similar to PyTorch's TensorDataset,
+        but support for PDB fn, auxiliary inputs, and dictionary return value """
 
-    def __init__(self, inputs: Tensor, targets: Tensor, pdb_fn: str = None) -> None:
-        # DMS datasets only support one PDB_fn for the whole dataset, so pdb_fn is a single string
+    def __init__(
+            self,
+            inputs: Tensor,
+            targets: Tensor,
+            pdb_fn: str = None,
+            aux_inputs: dict[str, Any] = None) -> None:
+
+        # DMS datasets only support one PDB_fn for the whole dataset
+        # so pdb_fn is a single string
         self.inputs = inputs
         self.targets = targets
         self.pdb_fn = pdb_fn
+        self.aux_inputs = aux_inputs
 
     def __getitem__(self, index):
         out_dict = {"inputs": self.inputs[index]}
@@ -57,6 +65,10 @@ class DMSDataset(torch.utils.data.Dataset):
 
         if self.pdb_fn is not None:
             out_dict["pdb_fns"] = self.pdb_fn
+
+        if self.aux_inputs is not None:
+            for key, value in self.aux_inputs.items():
+                out_dict[key] = value[index]
 
         return out_dict
 

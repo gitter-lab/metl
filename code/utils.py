@@ -136,6 +136,10 @@ def load_dataset(ds_name: Optional[str] = None,
         # merge epistasis data with dataset
         ds = pd.merge(ds, epistasis_df, on="variant", how="left")
 
+    # downcast all float64 columns to float32
+    for col in ds.select_dtypes(include=["float64"]).columns:
+        ds[col] = ds[col].astype("float32")
+
     return ds
 
 
