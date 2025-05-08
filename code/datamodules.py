@@ -64,7 +64,7 @@ class DMSDataModule(pl.LightningDataModule):
                             type=float, default=0)
         parser.add_argument("--aux_input_names",
                             help="the names of the auxiliary inputs which the model can access at any layer",
-                            type=str, default=None)
+                            type=str, nargs="+", default=None)
         parser.add_argument("--aux-formats",
                             help="Comma-separated list of aux input formats, e.g. 'feat1=tensor,feat2=numpy,feat3=string'."
                                  " Valid formats are 'tensor', 'numpy', and 'string'. If not specified, all numerical aux inputs"
