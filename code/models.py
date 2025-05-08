@@ -1094,36 +1094,6 @@ class TransferModel(nn.Module):
         return self.model(x, **kwargs)
 
 
-class LayerThatAcceptsAuxInputs(nn.Module):
-    """ simple module that allows auxiliary inputs """
-    def forward(self, x, **kwargs):
-        print("Module: {}".format(self.__class__.__name__))
-        print("Aux inputs: {}".format(kwargs.keys()))
-
-
-class LayerThatDoesNotAcceptAuxInputs(nn.Module):
-    def forward(self, x):
-        # if aux inputs / additional kwargs are passed in, the script will crash
-        # here because this forward function does not accept them
-        print("Module: {}".format(self.__class__.__name__))
-
-
-class AuxiliaryInputsTestModel(nn.Module):
-    """ a simple model for testing auxiliary inputs  """
-
-    def __init__(self, *args, **kwargs):
-        super().__init__()
-
-        self.model = SequentialWithArgs(
-            LayerThatAcceptsAuxInputs(),
-            LayerThatDoesNotAcceptAuxInputs()
-        )
-
-    def forward(self, x, **kwargs):
-        output = self.model(x, **kwargs)
-        return output
-
-
 def get_activation_fn(activation, functional=True):
     if activation == "relu":
         return F.relu if functional else nn.ReLU()
@@ -1148,7 +1118,6 @@ class Model(enum.Enum):
         self.cls = cls
         self.transfer_model = transfer_model
 
-    aux = AuxiliaryInputsTestModel, False
     linear = LRModel, False
     fully_connected = FCModel, False
     cnn = ConvModel, False
