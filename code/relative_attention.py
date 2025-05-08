@@ -494,7 +494,7 @@ class RelativeTransformerEncoder(nn.Module):
         if reset_params:
             self.apply(models.reset_parameters_helper)
 
-    def forward(self, src: Tensor, pdb_fn=None) -> Tensor:
+    def forward(self, src: Tensor, pdb_fn=None, **kwargs) -> Tensor:
         output = src
 
         for mod in self.layers:

@@ -1,6 +1,7 @@
 """ model implementations """
 
 import collections
+import inspect
 import math
 from argparse import ArgumentParser
 import enum
@@ -39,15 +40,35 @@ def reset_parameters_helper(m: nn.Module):
 
 
 class SequentialWithArgs(nn.Sequential):
+    """ a sequential model wrapper  that allows for passing in additional arguments
+        to the forward function. this is useful for passing in the pdb_fn to the
+        relative transformer encoder as well as other auxiliary inputs """
+
+    def __init__(self, *args):
+        super().__init__(*args)
+        # cache which modules accept kwargs
+        self._kwargs_support_cache = {
+            module: self._accepts_kwargs(module.forward)
+            for module in self
+        }
+
     def forward(self, x, **kwargs):
         for module in self:
-            if isinstance(module, (ra.RelativeTransformerEncoder, SequentialWithArgs)):
-                # for relative transformer encoders, pass in kwargs (pdb_fn)
+            if self._kwargs_support_cache.get(module, False):
                 x = module(x, **kwargs)
             else:
-                # for all modules, don't pass in kwargs
                 x = module(x)
         return x
+
+    @staticmethod
+    def _accepts_kwargs(func):
+        # new way of checking if the module accepts kwargs
+        # by inspecting the signatures instead of maintaining a list manually
+        sig = inspect.signature(func)
+        for param in sig.parameters.values():
+            if param.kind == param.VAR_KEYWORD:
+                return True
+        return False
 
 
 class PositionalEncoding(nn.Module):

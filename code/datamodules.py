@@ -3,7 +3,7 @@
 import warnings
 from argparse import ArgumentParser
 from os.path import dirname, join
-from typing import Optional, Union
+from typing import Optional, Union, Any
 
 import numpy as np
 import pandas as pd
@@ -62,6 +62,14 @@ class DMSDataModule(pl.LightningDataModule):
         parser.add_argument("--target_offset",
                             help="an offset to add to every target value in the dataset",
                             type=float, default=0)
+        parser.add_argument("--aux_input_names",
+                            help="the names of the auxiliary inputs which the model can access at any layer",
+                            type=str, nargs="+", default=None)
+        parser.add_argument("--aux-formats",
+                            help="Comma-separated list of aux input formats, e.g. 'feat1=tensor,feat2=numpy,feat3=string'."
+                                 " Valid formats are 'tensor', 'numpy', and 'string'. If not specified, all numerical aux inputs"
+                                 " will be converted to tensors, and all string aux inputs will be left as strings.",
+                            type=str, default="")
         parser.add_argument("--split_dir",
                             help="the directory containing the train/tune/test split",
                             type=str, default=None)
@@ -105,6 +113,8 @@ class DMSDataModule(pl.LightningDataModule):
                  target_roll: int = 0,
                  standardize_targets: bool = False,
                  target_offset: float = 0,
+                 aux_input_names: Optional[Union[str, list[str], tuple[str]]] = None,
+                 aux_formats: Optional[str] = None,
                  train_name: str = "train",
                  val_name: str = "val",
                  test_name: str = "test",
@@ -117,6 +127,8 @@ class DMSDataModule(pl.LightningDataModule):
 
         # basic dataset and encoding info
         self.ds_name = ds_name
+        # load dataset metadata
+        self.ds_metadata = utils.load_dataset_metadata()[self.ds_name]
         self.pdb_fn = None
         self._init_pdb_fn(pdb_fn)
 
@@ -182,14 +194,16 @@ class DMSDataModule(pl.LightningDataModule):
             warnings.warn("detected rosetta encoding, calculating standardization parameters for input features")
             self._calc_input_standardize_params()
 
+        # set up auxiliary inputs
+        self.aux_input_names = None
+        self._init_aux_input_names(aux_input_names)
+        self.aux_input_formats = self.parse_aux_formats(aux_formats)
+
         # initialize DMSDataset that are used later in this module to load dataloaders, etc
         self.train_ds = None
         self.val_ds = None
         self.test_ds = None
         self.full_ds = None
-
-        # load dataset metadata
-        self.ds_metadata = utils.load_dataset_metadata()[self.ds_name]
 
         # amino acid sequence length
         self.aa_seq_len = len(self.ds_metadata["wt_aa"])
@@ -199,10 +213,14 @@ class DMSDataModule(pl.LightningDataModule):
         self.example_input_array = None
         self.aa_encoding_len = None
         self.seq_encoding_len = None
-        sample_batch = self.get_sample_batch()
-        if sample_batch is not None:
-            self._init_example_input_array(sample_batch)
-            self._init_encoding_lens(sample_batch)
+        sample_encoded_data_batch = self.get_sample_encoded_data_batch()
+        sample_aux_batch = self.get_sample_aux_batch()
+        if sample_encoded_data_batch is not None:
+            self._init_encoding_lens(sample_encoded_data_batch)
+            self._init_example_input_array(
+                sample_encoded_data_batch,
+                sample_aux_batch
+            )
 
     def _init_pdb_fn(self, pdb_fn):
         if pdb_fn == "auto":
@@ -210,35 +228,57 @@ class DMSDataModule(pl.LightningDataModule):
         else:
             self.pdb_fn = pdb_fn
 
-    def _init_example_input_array(self, sample_batch):
-        # example input array helps with sanity checking and printing full model summaries
-        self.example_input_array = {"x": torch.from_numpy(sample_batch), "pdb_fn": self.pdb_fn}
+    def _init_example_input_array(
+            self,
+            sample_encoded_data_batch: np.ndarray,
+            sample_aux_batch: Optional[dict[str, Any]]) -> None:
 
-    def get_sample_batch(self):
-        """ compute a sample batch of encoded data used for example input array, sequence encoding lengths, etc """
-        # encode a full batch of variants to get the encoding length (the last dim) and an example_input_array
+        # example input array helps with sanity checking
+        # and printing full model summaries
+        example_input_array = {
+            "x": torch.from_numpy(sample_encoded_data_batch),
+            "pdb_fn": self.pdb_fn
+        }
+
+        if sample_aux_batch is not None:
+            # group aux inputs into their own dictionary
+            example_input_array["aux"] = sample_aux_batch
+
+        self.example_input_array = example_input_array
+
+    def get_sample_encoded_data_batch(self) -> np.ndarray:
+        """ compute a sample batch of encoded data used for example input array,
+            sequence encoding lengths, etc """
+
+        # encode a full batch of variants to get the encoding
+        # length (the last dim) and an example_input_array
         variants = self.ds.iloc[0:self.batch_size]["variant"].tolist()
         return self.get_encoded_variants(variants)
 
-    def _init_encoding_lens(self, sample_batch):
-        if sample_batch is None:
+    def get_sample_aux_batch(self) -> Optional[dict[str, Any]]:
+        """ compute a sample batch of auxiliary data used for example input array """
+        batch_idxs = np.arange(self.batch_size)
+        return self._get_aux_inputs_for_idxs(batch_idxs)
+
+    def _init_encoding_lens(self, sample_encoded_data_batch: np.ndarray) -> None:
+        if sample_encoded_data_batch is None:
             # encoding length stuff is extra, only used for METL models, so give option not to compute it
             warnings.warn("Unable to compute aa_encoding_len and seq_encoding_len because sample_batch is None")
             return
-        if len(sample_batch.shape) not in [2, 3]:
-            raise ValueError("temp_enc_variant has an unknown shape: {}".format(sample_batch.shape))
-        elif len(sample_batch.shape) == 2:
+        if len(sample_encoded_data_batch.shape) not in [2, 3]:
+            raise ValueError("temp_enc_variant has an unknown shape: {}".format(sample_encoded_data_batch.shape))
+        elif len(sample_encoded_data_batch.shape) == 2:
             # if 2 dimensions, then it's a seq-level encoding (batch_size, encoded_seq)
             self.aa_encoding_len = 0
-            self.seq_encoding_len = sample_batch.shape[-1]
-        elif len(sample_batch.shape) == 3:
+            self.seq_encoding_len = sample_encoded_data_batch.shape[-1]
+        elif len(sample_encoded_data_batch.shape) == 3:
             # if 3 dimensions, then it's an amino-acid level encoding (batch_size, aa_seq_len, enc_len)
-            self.aa_encoding_len = sample_batch.shape[-1]
+            self.aa_encoding_len = sample_encoded_data_batch.shape[-1]
             self.seq_encoding_len = self.aa_seq_len * self.aa_encoding_len
             # an additional validation check just in case
-            if self.aa_seq_len != sample_batch.shape[-2]:
+            if self.aa_seq_len != sample_encoded_data_batch.shape[-2]:
                 raise ValueError("expected aa_seq_len to be {}, but temp_enc_variant is {}".format(
-                    self.aa_seq_len, sample_batch.shape[-2]))
+                    self.aa_seq_len, sample_encoded_data_batch.shape[-2]))
 
     def _auto_test_name(self, test_name):
         if test_name != "auto":
@@ -283,7 +323,7 @@ class DMSDataModule(pl.LightningDataModule):
         self.target_names = target_names
         self.num_tasks = len(self.target_names)
 
-    def _calc_target_standardize_params(self):
+    def _calc_target_standardize_params(self) -> None:
         """ calculate the means and standard deviations of all energy terms for the train set """
         # if there is no split... standardize using the full dataset, but throw a warning just in case
         if self.split_idxs is None:
@@ -343,6 +383,39 @@ class DMSDataModule(pl.LightningDataModule):
         self.input_standardize_means = np.concatenate(standardize_means)
         self.input_standardize_stds = np.concatenate(standardize_stds)
 
+    def _init_aux_input_names(
+            self,
+            aux_input_names: Optional[Union[str, list[str], tuple[str]]]) -> None:
+
+        if aux_input_names is None:
+            return
+
+        # if the auxiliary input names are a string or tuple, convert to a list
+        if isinstance(aux_input_names, str):
+            aux_input_names = [aux_input_names]
+        elif isinstance(aux_input_names, tuple):
+            aux_input_names = list(aux_input_names)
+
+        # verify all the auxiliary input names are in the dataset
+        for ain in aux_input_names:
+            if ain not in self.ds:
+                raise ValueError("auxiliary input not found in dataset: {}".format(ain))
+
+        self.aux_input_names = aux_input_names
+
+    @staticmethod
+    def parse_aux_formats(s: str) -> dict[str, str]:
+        if not s:
+            return {}
+        out = {}
+        for item in s.split(","):
+            key, val = item.split("=")
+            val = val.strip().lower()
+            if val not in ("tensor", "numpy", "string"):
+                raise ValueError(f"invalid format '{val}' for aux input '{key.strip()}'")
+            out[key.strip()] = val
+        return out
+
     def prepare_data(self):
         # prepare_data is called from a single GPU. Do not use it to assign state (self.x = y).
         pass
@@ -356,14 +429,18 @@ class DMSDataModule(pl.LightningDataModule):
         return variants
 
     @staticmethod
-    def _standardize(data, means, stds):
+    def _standardize(data: np.ndarray,
+                     means: np.ndarray,
+                     stds: np.ndarray) -> np.ndarray:
+
         if means is None or stds is None:
             raise ValueError("need to standardize, but standardize params are None")
 
-        standardized_data = np.divide((data - means), stds, out=np.zeros_like(data), where=stds != 0)
+        standardized_data = np.divide((data - means), stds, out=np.zeros_like(data),
+                                      where=stds != 0)
         return standardized_data
 
-    def _standardize_inputs(self, data):
+    def _standardize_inputs(self, data: np.ndarray) -> np.ndarray:
         """ perform standardization of rosetta energies using the given means and standard deviations """
         if self.input_standardize_means is None or self.input_standardize_stds is None:
             raise ValueError("need to standardize rosetta encoded data, but standardize params are None")
@@ -376,11 +453,20 @@ class DMSDataModule(pl.LightningDataModule):
         targets = self._standardize(data, self.target_standardize_means, self.target_standardize_stds)
         return targets
 
-    def _get_raw_encoded_variants(self, variants: list[str], concat: bool = True):
-        enc_data = enc.encode(encoding=self.encoding, variants=variants, ds_name=self.ds_name, concat=concat)
+    def _get_raw_encoded_variants(
+            self,
+            variants: list[str],
+            concat: bool = True) -> np.ndarray:
+
+        enc_data = enc.encode(
+            encoding=self.encoding,
+            variants=variants,
+            ds_name=self.ds_name,
+            concat=concat
+        )
         return enc_data
 
-    def get_encoded_variants(self, variants: list[str]):
+    def get_encoded_variants(self, variants: list[str]) -> np.ndarray:
         enc_data = self._get_raw_encoded_variants(variants, concat=True)
 
         # standardize if using rosetta encoding
@@ -396,12 +482,11 @@ class DMSDataModule(pl.LightningDataModule):
         variants = self.get_variants(set_name)
         return self._get_raw_encoded_variants(variants, concat=concat)
 
-    def get_encoded_data(self, set_name: Optional[str]):
-        # print("Encoding data for set: {}".format(set_name))
+    def get_encoded_data(self, set_name: Optional[str]) -> np.ndarray:
         variants = self.get_variants(set_name)
         return self.get_encoded_variants(variants)
 
-    def _get_raw_targets(self, set_name: Optional[str]):
+    def _get_raw_targets(self, set_name: Optional[str]) -> Optional[np.ndarray]:
         if self.target_names is None:
             return None
 
@@ -413,7 +498,11 @@ class DMSDataModule(pl.LightningDataModule):
 
         return targets
 
-    def get_targets(self, set_name: Optional[str], squeeze: bool = False):
+    def get_targets(
+            self,
+            set_name: Optional[str],
+            squeeze: bool = False) -> Optional[np.ndarray]:
+
         targets = self._get_raw_targets(set_name)
         if targets is None:
             return None
@@ -432,6 +521,50 @@ class DMSDataModule(pl.LightningDataModule):
             targets = targets.squeeze()
 
         return targets
+
+    def _get_aux_inputs_for_idxs(self, idxs: np.ndarray) -> Optional[dict[str, Any]]:
+        if self.aux_input_names is None:
+            return None
+
+        aux_inputs = {}
+        for ain in self.aux_input_names:
+            col = self.ds.iloc[idxs][ain]
+
+            if ain in self.aux_input_formats:
+                # if a format is specified for this auxiliary input, use it
+                fmt = self.aux_input_formats[ain]
+            elif pd.api.types.is_numeric_dtype(col):
+                # otherwise default to pytorch tensor if column is numeric
+                fmt = "tensor"
+            else:
+                fmt = "string"
+
+            if fmt == "tensor":
+                if not pd.api.types.is_numeric_dtype(col):
+                    raise TypeError(
+                        f"Cannot convert non-numeric column '{ain}' to tensor.")
+                aux_inputs[ain] = torch.from_numpy(col.to_numpy())
+            elif fmt == "numpy":
+                if not pd.api.types.is_numeric_dtype(col):
+                    raise TypeError(
+                        f"Cannot convert non-numeric column '{ain}' to numpy array.")
+                aux_inputs[ain] = col.to_numpy()
+            elif fmt == "string":
+                aux_inputs[ain] = col.tolist()
+            else:
+                raise ValueError(f"Invalid aux input format '{fmt}' for column '{ain}'")
+
+        return aux_inputs
+
+    def get_aux_inputs(self, set_name: Optional[str]) -> Optional[dict[str, Any]]:
+        if set_name is None:
+            # get indexes for the entire dataset
+            idxs = np.arange(len(self.ds))
+        else:
+            # get indexes for the given set name
+            idxs = self.get_split_idxs(set_name)
+
+        return self._get_aux_inputs_for_idxs(idxs)
 
     def has_set(self, set_name: str, user_set_name: bool = False):
         if self.split_idxs is None:
@@ -462,13 +595,17 @@ class DMSDataModule(pl.LightningDataModule):
         if set_name == "_wt":
             targets = None
             enc_data = self.get_encoded_variants(["_wt"])
+            # todo: how should we handle the auxiliary inputs for the wild-type variant?
+            aux_inputs = None
         else:
             targets = self.get_targets(set_name)
             enc_data = self.get_encoded_data(set_name)
+            aux_inputs = self.get_aux_inputs(set_name)
 
         torch_ds = datasets.DMSDataset(inputs=torch.from_numpy(enc_data),
                                        targets=None if targets is None else torch.from_numpy(targets),
-                                       pdb_fn=self.pdb_fn)
+                                       pdb_fn=self.pdb_fn,
+                                       aux_inputs=aux_inputs)
         return torch_ds
 
     def setup(self, stage=None):
@@ -537,6 +674,8 @@ class DMSDataModule(pl.LightningDataModule):
             return self._get_dataloader(self.full_ds)
         elif self.predict_mode == "wt":
             return self._get_dataloader(self.wt_ds)
+        else:
+            raise ValueError("unknown predict mode: {}".format(self.predict_mode))
 
 
 class RosettaDataModule(pl.LightningDataModule):
