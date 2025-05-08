@@ -66,9 +66,10 @@ class DMSDataset(torch.utils.data.Dataset):
         if self.pdb_fn is not None:
             out_dict["pdb_fns"] = self.pdb_fn
 
+        # group auxiliary inputs into a dictionary
         if self.aux_inputs is not None:
-            for key, value in self.aux_inputs.items():
-                out_dict[key] = value[index]
+            aux = {k: v[index] for k, v in self.aux_inputs.items()}
+            out_dict["aux"] = aux
 
         return out_dict
 

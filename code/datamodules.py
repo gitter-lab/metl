@@ -241,7 +241,8 @@ class DMSDataModule(pl.LightningDataModule):
         }
 
         if sample_aux_batch is not None:
-            example_input_array.update(sample_aux_batch)
+            # group aux inputs into their own dictionary
+            example_input_array["aux"] = sample_aux_batch
 
         self.example_input_array = example_input_array
 
