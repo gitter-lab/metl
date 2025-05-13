@@ -267,12 +267,17 @@ class DMSTask(pl.LightningModule):
     def _shared_step(self, data_batch, batch_idx, compute_loss=True):
         inputs = data_batch["inputs"]
         labels = data_batch["targets"]
+
         # the pdb file if one is provided by the dataloader (for relative position 3D)
         # we only support one pdb file per batch, so just choose the first one (index 0)
         # in the future, if we support multiple per batch, we can pass in all the pdb files
         pdb_fn = data_batch["pdb_fns"][0] if "pdb_fns" in data_batch else None
 
-        outputs = self(inputs, pdb_fn=pdb_fn)
+        # auxiliary inputs for the model
+        # if they are not provided, we just pass in an empty dictionary
+        aux = data_batch.get("aux", {})
+
+        outputs = self(inputs, pdb_fn=pdb_fn, **aux)
         if compute_loss:
             loss = F.mse_loss(outputs, labels)
             return outputs, loss
