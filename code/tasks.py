@@ -310,14 +310,15 @@ class DMSTask(pl.LightningModule):
 
         outputs = self(inputs, pdb_fn=pdb_fn, **aux)
         if compute_loss:
-            loss = F.mse_loss(outputs, labels)
             if self.loss_func == "mse":
                 loss = F.mse_loss(outputs, labels)
+                return outputs, loss
             elif self.loss_func == "corn":
                 num_classes = outputs.shape[1] + 1
                 loss = self.loss_corn(outputs, labels, num_classes)
                 outputs = self._shared_step_corn_inference(outputs)
-            return outputs, loss
+                return outputs, loss
+
         else:
             if self.loss_func == "mse":
                 pass
@@ -363,6 +364,14 @@ class DMSTask(pl.LightningModule):
 
         outputs = self._shared_step(data_batch, batch_idx, compute_loss=False)
 
+        if self.loss_func=='corn':
+            # if we have a corn loss we need the user specified prediction feature
+            log_prediction = self._get_corn_outputs(outputs)
+            # return two values to save all probabilities (included in outputs)
+            # while also having a prediction for scatterplots, test metrics, etc.
+            # predictions will be handled by training_utils.parse_raw_preds_and_save()
+            return (log_prediction,outputs)
+
         return outputs
 
     def configure_optimizers(self):
@@ -404,7 +413,7 @@ class DMSTask(pl.LightningModule):
                 continue
 
             num_examples += len(train_labels)
-            pred = logits[train_examples, task_index]
+            pred = logits[train_examples.flatten(), task_index]
 
             loss = -torch.sum(F.logsigmoid(pred)*train_labels
                               + (F.logsigmoid(pred) - pred) * (1-train_labels)
@@ -442,7 +451,9 @@ class DMSTask(pl.LightningModule):
         if self.corn_pred_feature == 'raw_predictions':
             return outputs[:, 0]
         else:
-            return outputs[:, int(self.corn_pred_feature)]
+            # if we want a probability input it's the bin that was input
+            # with 1 indexing.
+            return outputs[:, int(self.corn_pred_feature)-1]
 
 class SKTopNetTask(pl.LightningModule):
     @staticmethod
