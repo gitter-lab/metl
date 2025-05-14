@@ -218,7 +218,11 @@ def metrics_df_to_dict(df, suffix=""):
 
 
 def log_metrics(raw_preds, dm, log_dir, trainer, args):
-    predictions_d = training_utils.save_predictions(raw_preds, dm, log_dir, save_format="npy")
+
+    # must first parse and save to consider the case of corn loss function (or multiple values
+    # which to be saved as outputs.
+    predictions_d=training_utils.parse_raw_preds_and_save(raw_preds, dm, log_dir, args)
+
     training_utils.save_scatterplots(dm, predictions_d, log_dir)
     metrics_df = training_utils.save_metrics_custom(dm, predictions_d, log_dir)
     training_utils.plot_losses(log_dir)
@@ -231,7 +235,7 @@ def log_metrics(raw_preds, dm, log_dir, trainer, args):
         # saves a metric_custom_last.txt file with the metrics computed on the last checkpoint
         # run the test metrics via PTL for wandb :)
         raw_preds = trainer.predict(ckpt_path="last", datamodule=dm, return_predictions=True)
-        predictions_d = training_utils.save_predictions(raw_preds, dm, log_dir, save_format="npy", suffix="_last")
+        predictions_d = training_utils.parse_raw_preds_and_save(raw_preds, dm, log_dir, args, suffix="_last")
         training_utils.save_scatterplots(dm, predictions_d, log_dir, suffix="_last")
         metrics_df = training_utils.save_metrics_custom(dm, predictions_d, log_dir, suffix="_last")
         if args.use_wandb and metrics_df is not None:
@@ -313,6 +317,8 @@ def main(args: argparse.Namespace):
 
     # save predictions, scatterplots, and custom metrics. plot train loss vs. val loss
     raw_preds = trainer.predict(ckpt_path="best", datamodule=dm, return_predictions=True)
+
+
 
     # log end of training metrics
     log_metrics(raw_preds, dm, log_dir, trainer, args)
