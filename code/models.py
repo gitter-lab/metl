@@ -956,6 +956,7 @@ class TransferModel(nn.Module):
         p.add_argument("--top_net_norm_before_activation", action="store_true")
         p.add_argument("--top_net_use_dropout", action="store_true")
         p.add_argument("--top_net_dropout_rate", type=float, default=0.1)
+        p.add_argument("--top_net_output_dim", type=float, default=1)
 
         return p
 
@@ -976,6 +977,7 @@ class TransferModel(nn.Module):
                  top_net_norm_before_activation: bool = False,
                  top_net_use_dropout: bool = False,
                  top_net_dropout_rate: float = 0.1,
+                 top_net_output_dim: int = 1,
                  *args, **kwargs):
 
         super().__init__()
@@ -1071,7 +1073,7 @@ class TransferModel(nn.Module):
         # create a new prediction layer on top of the backbone
         if top_net_type == "linear":
             # linear layer for prediction
-            layers["prediction"] = nn.Linear(in_features=pred_layer_input_features, out_features=1)
+            layers["prediction"] = nn.Linear(in_features=pred_layer_input_features, out_features=int(top_net_output_dim))
         elif top_net_type == "nonlinear":
             # fully connected with hidden layer
             fc_block = FCBlock(in_features=pred_layer_input_features,
@@ -1082,7 +1084,7 @@ class TransferModel(nn.Module):
                                use_dropout=top_net_use_dropout,
                                dropout_rate=top_net_dropout_rate)
 
-            pred_layer = nn.Linear(in_features=top_net_hidden_nodes, out_features=1)
+            pred_layer = nn.Linear(in_features=pred_layer_input_features, out_features=int(top_net_output_dim))
 
             layers["prediction"] = SequentialWithArgs(fc_block, pred_layer)
         else:
