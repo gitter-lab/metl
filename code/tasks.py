@@ -190,8 +190,28 @@ class RosettaTask(pl.LightningModule):
 class DMSTask(pl.LightningModule):
     @staticmethod
     def add_model_specific_args(parent_parser):
-        return training_utils.OptimizerConfig.add_model_specific_args(parent_parser)
-
+        # add arguments related to the optimizer
+        parser_with_optimizer_args = training_utils.OptimizerConfig.add_model_specific_args(parent_parser)
+        # add arguments related to the loss function
+        p = ArgumentParser(parents=[parser_with_optimizer_args], add_help=False)
+        p.add_argument('--loss_func', type=str, default="mse", choices=["mse", "corn"] ,
+                       help='Loss function to consider. "mse" is mean square error.'
+                            'If using ordinal data consider using "corn" loss. This loss requires '
+                            'specifying --top_net_output_dim input as well. Which is the '
+                            'equal to the N-1 the number of bins present in the data.'
+                            'Paper: Deep Neural Networks for Rank-Consistent Ordinal Regression Based On Conditional Probabilities'
+                            'https://doi.org/10.48550/arXiv.2111.08851')
+        p.add_argument('--corn_pred_feature', type=str, default="raw_predictions",
+                       help='Specific CORN feature used to calculate test metrics and produce scatter plots '
+                            '(training logs purposes only),'
+                            'raw_predictions corresponds to the predictions which come traditionally from '
+                            'the highest rank bin that has a probability greater than >0.5."'
+                            'An input of "1" will use the probability of the second lowest rank bin. (as the lowest always has P(dead)=1)'
+                            'An input of "N" (where N is number of bins used)'
+                            'will use the probability of the highest rank bin.'
+                            'This feature will not impact how predictions are saved'
+                            'Predictions will output raw_predictions and all probabilities of bins.')
+        return p
     def __init__(self,
                  # the model to use (see models.py)
                  model_name: str,
@@ -218,6 +238,9 @@ class DMSTask(pl.LightningModule):
                  _task_type: str = "dms",
                  # all other trainer and model params
                  save_hyperparams=True,
+                 loss_func: str = "mse",
+                 #specific corn loss feature, which feature to use for metrics
+                 corn_pred_feature: str = 'raw_predictions',
                  *args, **kwargs):
 
         super().__init__()
@@ -252,6 +275,8 @@ class DMSTask(pl.LightningModule):
         self.test_pearson = torchmetrics.PearsonCorrCoef()
         self.test_spearman = torchmetrics.SpearmanCorrCoef()
 
+        self.loss_func = loss_func
+        self.corn_pred_feature = corn_pred_feature
         # if the model type is a TransferModel, we also want to save the
         # hyperparameters of the pre-trained model that we are transferring from
         # this will help reconstruct the model when loading from a checkpoint
@@ -286,9 +311,22 @@ class DMSTask(pl.LightningModule):
         outputs = self(inputs, pdb_fn=pdb_fn, **aux)
         if compute_loss:
             loss = F.mse_loss(outputs, labels)
+            if self.loss_func == "mse":
+                loss = F.mse_loss(outputs, labels)
+            elif self.loss_func == "corn":
+                num_classes = outputs.shape[1] + 1
+                loss = self.loss_corn(outputs, labels, num_classes)
+                outputs = self._shared_step_corn_inference(outputs)
             return outputs, loss
         else:
+            if self.loss_func == "mse":
+                pass
+            elif self.loss_func == "corn":
+                outputs=self._shared_step_corn_inference(outputs)
             return outputs
+
+
+
 
     def training_step(self, data_batch, batch_idx):
         outputs, loss = self._shared_step(data_batch, batch_idx)
@@ -304,6 +342,12 @@ class DMSTask(pl.LightningModule):
 
     def test_step(self, data_batch, batch_idx):
         outputs, loss = self._shared_step(data_batch, batch_idx)
+
+
+        if self.loss_func=='corn':
+            # if we have a corn loss we need the user specified prediction feature
+            outputs = self._get_corn_outputs(outputs)
+
         self.log("test_loss", loss)
 
         labels = data_batch["targets"]
@@ -316,7 +360,9 @@ class DMSTask(pl.LightningModule):
         return loss
 
     def predict_step(self, data_batch, batch_idx, dataloader_idx=0):
+
         outputs = self._shared_step(data_batch, batch_idx, compute_loss=False)
+
         return outputs
 
     def configure_optimizers(self):
@@ -339,6 +385,64 @@ class DMSTask(pl.LightningModule):
 
         return optimizer_config.get_optimizer_config(trainable_parameters, self.trainer.estimated_stepping_batches)
 
+
+    def loss_corn(self, logits, y_train, num_classes):
+        # new specific functions only for CORN loss
+        sets = []
+        for i in range(num_classes - 1):
+            label_mask = y_train > i - 1
+            label_tensor = (y_train[label_mask] > i).to(torch.int64)
+            sets.append((label_mask, label_tensor))
+
+        num_examples = 0
+        losses = 0.
+        for task_index, s in enumerate(sets):
+            train_examples = s[0]
+            train_labels = s[1]
+
+            if len(train_labels) < 1:
+                continue
+
+            num_examples += len(train_labels)
+            pred = logits[train_examples, task_index]
+
+            loss = -torch.sum(F.logsigmoid(pred)*train_labels
+                              + (F.logsigmoid(pred) - pred) * (1-train_labels)
+                              )
+            losses += loss
+        return losses / num_examples
+
+    def proba_from_logits(self, logits):
+        # new specific functions only for CORN loss
+        probas = torch.sigmoid(logits)
+        probas = torch.cumprod(probas, dim=1)
+        return probas
+
+    def label_from_logits(self, logits):
+        """ Converts logits to class labels.
+        This is function is specific to CORN.
+        """
+        probas = torch.sigmoid(logits)
+        probas = torch.cumprod(probas, dim=1)
+        predict_levels = probas > 0.5
+        predicted_labels = torch.sum(predict_levels, dim=1)
+        return predicted_labels
+
+    def _shared_step_corn_inference(self, outputs):
+        labels = self.label_from_logits(outputs)  # shape: (batch_size, 1) or (batch_size,)
+        probas = self.proba_from_logits(outputs)  # shape: (batch_size, num_classes)
+        # If labels is 1D, unsqueeze it to make it 2D for stacking
+        if labels.dim() == 1:
+            labels = labels.unsqueeze(1)  # shape: (batch_size, 1)
+        # Now horizontally stack them
+        outputs = torch.cat([labels, probas], dim=1)  # shape: (batch_size, 1 + num_classes)
+        return outputs
+
+    def _get_corn_outputs(self,outputs):
+        if self.corn_pred_feature == 'raw_predictions':
+            return outputs[:, 0]
+        else:
+            return outputs[:, int(self.corn_pred_feature)]
 
 class SKTopNetTask(pl.LightningModule):
     @staticmethod
