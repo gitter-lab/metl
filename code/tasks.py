@@ -266,7 +266,9 @@ class DMSTask(pl.LightningModule):
 
     def _shared_step(self, data_batch, batch_idx, compute_loss=True):
         inputs = data_batch["inputs"]
-        labels = data_batch["targets"]
+
+        # labels might not be provided if we are doing inference
+        labels = data_batch["targets"] if "targets" in data_batch else None
 
         # the pdb file if one is provided by the dataloader (for relative position 3D)
         # we only support one pdb file per batch, so just choose the first one (index 0)

@@ -40,16 +40,16 @@ class DMSDataModule(pl.LightningDataModule):
         parser = ArgumentParser(parents=[parent_parser], add_help=False)
 
         parser.add_argument("--ds_name",
-                            help="name of the dms dataset defined in constants.py",
-                            type=str, default="gb1")
-        parser.add_argument('--pdb_fn', type=str, default=None,
+                            help="name of the dms dataset defined in datasets.yml",
+                            type=str)
+        parser.add_argument('--pdb_fn', type=str, default="auto",
                             help="pdb file for relative_3D position encoding")
         parser.add_argument("--encoding",
                             help="which data encoding to use",
                             type=str, default="one_hot")
         parser.add_argument("--target_names",
                             help="the names of the target variables (currently only supports one target variable)",
-                            type=str, default=["score"])
+                            type=str, default=None)
         parser.add_argument("--shuffle_targets",
                             help="whether to shuffle the target labels/scores, for debugging",
                             action="store_true")
@@ -103,7 +103,7 @@ class DMSDataModule(pl.LightningDataModule):
 
     def __init__(self,
                  ds_name: str,
-                 pdb_fn: Optional[str] = None,
+                 pdb_fn: Optional[str] = "auto",
                  encoding: str = "one_hot",
                  flatten_encoded_data: bool = False,
                  target_names: Optional[Union[str, list[str], tuple[str]]] = None,
@@ -223,8 +223,12 @@ class DMSDataModule(pl.LightningDataModule):
             )
 
     def _init_pdb_fn(self, pdb_fn):
-        if pdb_fn == "auto":
+        if pdb_fn == "auto" and "pdb_fn" in self.ds_metadata:
             self.pdb_fn = self.ds_metadata["pdb_fn"]
+        elif pdb_fn == "auto" and "pdb_fn" not in self.ds_metadata:
+            warnings.warn("'pdb_fn' set to 'auto' but no pdb_fn found in "
+                          "dataset metadata. setting pdb_fn to None")
+            self.pdb_fn = None
         else:
             self.pdb_fn = pdb_fn
 
