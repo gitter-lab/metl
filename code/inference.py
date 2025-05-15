@@ -38,16 +38,6 @@ class PredictModelSummary(ModelSummary):
         self.on_fit_start(trainer, pl_module)
 
 
-def get_ident(uuid, uuid_ident_map_fn="output/model_index/uuid_ident_map.csv"):
-    ident = None
-    # check if the uuid_ident_map file exists
-    if isfile(uuid_ident_map_fn):
-        uuid_ident_map = pd.read_csv(uuid_ident_map_fn)
-        if uuid in uuid_ident_map.uuid.values:
-            ident = uuid_ident_map[uuid_ident_map.uuid == uuid].ident.values[0]
-    return ident
-
-
 def find_state_dict_prefix(state_dict, model_keys):
     """
     Finds the correct prefix to transform checkpoint keys to match model keys exactly.
@@ -152,13 +142,12 @@ def main(args):
 
     # determine the output directory and save file
     uuid = lm.hparams.uuid
-    ident = get_ident(uuid)
 
     if args.dataset_type == "dms":
         if args.wt:
-            output_dir = join(args.log_dir_base, f"{ident}_{uuid}/wt_{args.ds_name}")
+            output_dir = join(args.log_dir_base, f"{uuid}/wt_{args.ds_name}")
         else:
-            output_dir = join(args.log_dir_base, f"{ident}_{uuid}/dms_{args.ds_name}")
+            output_dir = join(args.log_dir_base, f"{uuid}/dms_{args.ds_name}")
 
     elif args.dataset_type == "rosetta":
         # the rosetta ds name is the name of the directory that args.rosetta_db_fn is in
@@ -168,12 +157,12 @@ def main(args):
         if args.split_dir is not None:
             output_dir = join(
                 args.log_dir_base,
-                f"{ident}_{uuid}/rosetta_{rosetta_ds_name}/{basename(args.split_dir)}/{args.predict_mode}"
+                f"{uuid}/rosetta_{rosetta_ds_name}/{basename(args.split_dir)}/{args.predict_mode}"
             )
         else:
             output_dir = join(
                 args.log_dir_base,
-                f"{ident}_{uuid}/rosetta_{rosetta_ds_name}/{args.predict_mode}"
+                f"{uuid}/rosetta_{rosetta_ds_name}/{args.predict_mode}"
             )
     else:
         raise ValueError("Dataset type must be either 'dms' or 'rosetta'")
