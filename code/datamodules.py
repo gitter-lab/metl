@@ -41,14 +41,15 @@ class DMSDataModule(pl.LightningDataModule):
 
         parser.add_argument("--ds_name",
                             help="name of the dms dataset defined in datasets.yml",
-                            type=str)
+                            type=str, required=True)
         parser.add_argument('--pdb_fn', type=str, default="auto",
                             help="pdb file for relative_3D position encoding")
         parser.add_argument("--encoding",
                             help="which data encoding to use",
                             type=str, default="one_hot")
         parser.add_argument("--target_names",
-                            help="the names of the target variables (currently only supports one target variable)",
+                            help="the names of the target variables "
+                                 "(currently only supports one target variable)",
                             type=str, default=None)
         parser.add_argument("--shuffle_targets",
                             help="whether to shuffle the target labels/scores, for debugging",
@@ -690,17 +691,15 @@ class RosettaDataModule(pl.LightningDataModule):
 
         parser.add_argument("--ds_fn",
                             help="filename of the csv/hdf5 dataset",
-                            type=str, default="data/rosetta_data/gb1_sample/gb1_sample.h5")
+                            type=str, required=True)
 
         parser.add_argument("--encoding",
-                            help="which data encoding to use. should be int_seqs if using an embedding."
-                                 " for backwards compat, auto will adopt old behavior of choosing encoding"
-                                 " based on the model type",
-                            type=str, default="auto")
+                            help="which data encoding to use.",
+                            type=str, default="one_hot")
 
         parser.add_argument("--split_dir",
                             help="the directory containing the train/tune/test split",
-                            type=str, default="data/rosetta_data/gb1_sample/splits/standard_tr0.8_tu0.1_te0.1_w3da7a2fd8b08_r11")
+                            type=str, required=True)
         parser.add_argument("--train_name",
                             help="name of the train set in the split dir",
                             type=str, default="train")
@@ -759,12 +758,14 @@ class RosettaDataModule(pl.LightningDataModule):
         self.ds_fn = ds_fn
 
         # target/task names and number of tasks
-        self.target_names = utils.get_rosetta_energy_targets(target_group=target_group,
-                                                             target_names=target_names,
-                                                             target_names_exclude=target_names_exclude)
+        self.target_names = utils.get_rosetta_energy_targets(
+            target_group=target_group,
+            target_names=target_names,
+            target_names_exclude=target_names_exclude
+        )
         self.num_tasks = len(self.target_names)
 
-        # the directory containing the train/val/test split and the set names within that dir
+        # the dir containing the train/val/test split and the set names within that dir
         self.train_name = train_name
         self.val_name = val_name
         self.test_name = test_name
@@ -782,7 +783,8 @@ class RosettaDataModule(pl.LightningDataModule):
         self.num_tokens = constants.NUM_CHARS
 
         # load PDB fn for each example, used for PDBSampler dataloader
-        self.pdb_fns = pd.read_csv(join(dirname(self.ds_fn), "pdb_fns.txt"), header=None).iloc[:, 0].to_numpy()
+        pdb_fns_path = join(dirname(self.ds_fn), "pdb_fns.txt")
+        self.pdb_fns = pd.read_csv(pdb_fns_path, header=None).iloc[:, 0].to_numpy()
         # split PDB fns for train/val/test sets (helps with batch sampler)
         self.pdb_fns_split = {set_name: self.pdb_fns[self.split[set_name]].tolist()
                               for set_name in [self.train_name, self.val_name, self.test_name]}
@@ -959,15 +961,55 @@ class RosettaDataModule(pl.LightningDataModule):
 
 
 class BasicRosettaDataModule(pl.LightningDataModule):
-    """ a very basic datamodule for Rosetta datasets made for the simple purpose
-        of running inference on the super test set which is needed to compute final metrics for the paper"""
+    """ a very basic datamodule for Rosetta datasets made for inference / prediction
+        this should ultimately be merged with the main RosettaDataModule, but
+        keeping it separate made for easier development for current purposes """
+
+    @staticmethod
+    def add_data_specific_args(parent_parser):
+        parser = ArgumentParser(parents=[parent_parser], add_help=False)
+
+        parser.add_argument(
+            "--ds_fn",
+            help="filename of the csv/hdf5 dataset",
+            type=str,
+            required=True
+        )
+        parser.add_argument(
+            "--encoding",
+            help="which data encoding to use",
+            type=str,
+            default="int_seqs"
+        )
+        parser.add_argument(
+            "--split_dir",
+            help="the directory containing the train/tune/test split. "
+                 "this is necessary even if predicting for the full "
+                 "dataset because the split_dir contains the std params",
+            type=str,
+            required=True
+        )
+        parser.add_argument(
+            "--batch_size",
+            help="batch size for the data loader",
+            type=int, default=32
+        )
+        parser.add_argument(
+            "--predict_mode",
+            help="prediction mode",
+            type=str,
+            default="full_dataset"
+        )
+
+        return parser
 
     def __init__(self,
                  ds_fn: str,
                  split_dir: str,
                  predict_mode: str,
                  batch_size: int = 32,
-                 encoding: str = "int_seqs"):
+                 encoding: str = "int_seqs",
+                 *args, **kwargs):
 
         super().__init__()
 
@@ -983,9 +1025,13 @@ class BasicRosettaDataModule(pl.LightningDataModule):
         self._init_pdb_fns()
 
         # load the pdb index
-        self.pdb_index = pd.read_csv("data/rosetta_data/pdb_index.csv", index_col="pdb_fn")
+        self.pdb_index = pd.read_csv(
+            "data/rosetta_data/pdb_index.csv",
+            index_col="pdb_fn"
+        )
 
-        # automatically determine whether to use the PDB sampler (must be enabled if multiple unique PDBs present)
+        # automatically determine whether to use the PDB sampler
+        # must be enabled if multiple unique PDBs present
         self.use_pdb_sampler = False
         if len(set(self.pdb_fns)) > 1:
             self.use_pdb_sampler = True
@@ -998,33 +1044,38 @@ class BasicRosettaDataModule(pl.LightningDataModule):
         example_full_seq_len = example_aa_seq_len
 
         # log some info about the example input array
-        print("Using example_input_array with pdb_fn='{}' and aa_seq_len={}".format(example_pdb_fn, example_aa_seq_len))
+        print(f"Using example_input_array with pdb_fn='{example_pdb_fn}' "
+              f"and aa_seq_len={example_aa_seq_len}")
 
         if self.encoding == "int_seqs":
-            arr = torch.randint(low=0, high=constants.NUM_CHARS, size=(self.batch_size, example_full_seq_len))
+            arr = torch.randint(
+                low=0,
+                high=constants.NUM_CHARS,
+                size=(self.batch_size, example_full_seq_len)
+            )
         elif self.encoding == "one_hot":
-            example_inds = torch.randint(low=0, high=constants.NUM_CHARS, size=(self.batch_size, example_full_seq_len))
+            example_inds = torch.randint(
+                low=0,
+                high=constants.NUM_CHARS,
+                size=(self.batch_size, example_full_seq_len)
+            )
             arr = F.one_hot(example_inds, constants.NUM_CHARS).float()
         else:
-            raise ValueError("unsupported encoding for example_input_array: {}".format(self.encoding))
+            raise ValueError(f"unsupported enc for example_input_array: {self.encoding}")
         return {"x": arr, "pdb_fn": example_pdb_fn}
 
     def _validate_predict_mode(self):
-        # full_dataset is not supported because RosettaDatasetSQL currently requires a set_name
-        if self.predict_mode == "full_dataset":
-            raise ValueError(f"predict_mode {self.predict_mode} not currently supported")
-
-        valid_split_predict_modes = list(self.split.keys())
+        valid_split_predict_modes = list(self.split.keys()) + ["full_dataset"]
         if self.predict_mode not in valid_split_predict_modes:
-            raise ValueError(f"valid split predict modes are: {valid_split_predict_modes}")
+            raise ValueError(f"valid predict modes are: {valid_split_predict_modes}")
 
     def _init_pdb_fns(self):
-        """ return a list of pdb fns in order for the data this module will output based on predict mode """
+        pdb_fns_path = join(dirname(self.ds_fn), "pdb_fns.txt")
         if self.predict_mode == "full_dataset":
-            self.pdb_fns = pd.read_csv(join(dirname(self.ds_fn), "pdb_fns.txt"), header=None).iloc[:, 0].to_numpy()
+            self.pdb_fns = pd.read_csv(pdb_fns_path, header=None).iloc[:, 0].to_numpy()
         else:
             # predict_mode is a set_name
-            all_pdb_fns = pd.read_csv(join(dirname(self.ds_fn), "pdb_fns.txt"), header=None).iloc[:, 0].to_numpy()
+            all_pdb_fns = pd.read_csv(pdb_fns_path, header=None).iloc[:, 0].to_numpy()
             self.pdb_fns = all_pdb_fns[self.split[self.predict_mode]].tolist()
 
     def prepare_data(self):
@@ -1043,10 +1094,11 @@ class BasicRosettaDataModule(pl.LightningDataModule):
         )
         return torch_ds
 
-    def get_dataloader(self,
-                       ds: torch.utils.data.Dataset,
-                       num_workers: int = 4,
-                       shuffle: bool = False):
+    def get_dataloader(
+            self,
+            ds: torch.utils.data.Dataset,
+            num_workers: int = 4,
+            shuffle: bool = False):
         persistent_workers = True if num_workers > 0 else False
         if self.use_pdb_sampler:
             sampler = pdb_sampler.PDBSampler(self.pdb_fns,

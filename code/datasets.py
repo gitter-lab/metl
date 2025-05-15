@@ -1,6 +1,6 @@
 """ custom PyTorch datasets used in METL """
 
-from os.path import dirname, join, isdir
+from os.path import dirname, join, isdir, isfile
 import sqlite3
 from typing import Optional, Any
 
@@ -20,11 +20,13 @@ except ImportError:
     import encode as enc
 
 def load_standardization_params(split_dir, train_only=True):
-    # if train_only True, then will only load standardization params for the training set (filename energy_X_train)
-    # otherwise, will load standardization params for the full dataset (filename energy_x_all)
+    # if train_only True, then will only load standardization params for
+    # the training set (filename energy_X_train). otherwise, will load
+    # standardization params for the full dataset (filename energy_x_all)
     standardization_params_dir = join(split_dir, "standardization_params")
     if not isdir(standardization_params_dir):
-        raise FileNotFoundError("standardization_params directory doesn't exist: {}".format(standardization_params_dir))
+        raise FileNotFoundError(f"standardization_params directory doesn't "
+                                f"exist: {standardization_params_dir}")
 
     if train_only:
         means_fn = join(standardization_params_dir, "energy_means_train.tsv")
@@ -32,6 +34,12 @@ def load_standardization_params(split_dir, train_only=True):
     else:
         means_fn = join(standardization_params_dir, "energy_means_all.tsv")
         stds_fn = join(standardization_params_dir, "energy_stds_all.tsv")
+
+    # make sure standardization params exist
+    if not isfile(means_fn):
+        raise FileNotFoundError(f"standardization file doesn't exist: {means_fn}")
+    if not isfile(stds_fn):
+        raise FileNotFoundError(f"standardization file doesn't exist: {stds_fn}")
 
     std_params = {"means": pd.read_csv(means_fn, sep="\t", index_col="pdb_fn"),
                   "stds": pd.read_csv(stds_fn, sep="\t", index_col="pdb_fn")}
@@ -87,7 +95,7 @@ class RosettaDatasetSQL(torch.utils.data.Dataset):
                  db_fn: str,
                  split_dir: str,
                  set_name: str,
-                 # target_names is optional to support inference-only mode where there will be no targets
+                 # optional because target_names not needed if only doing inference
                  target_names: Optional[list[str]],
                  encoding: str):
 
@@ -98,8 +106,13 @@ class RosettaDatasetSQL(torch.utils.data.Dataset):
         self.encoding = encoding
         self.set_name = set_name
 
-        # the indices (into the full database) of the current set, used for converting indices in __getitem__
-        self.set_idxs = sd.load_split_dir(split_dir)[set_name]
+        # the indices (into the full database) of the current set
+        # used for converting indices in __getitem__
+        if set_name == 'full_dataset':
+            row_count = self._get_row_count()
+            self.set_idxs = list(range(row_count))
+        else:
+            self.set_idxs = sd.load_split_dir(split_dir)[set_name]
 
         # global PDB index
         self.pdb_index = pd.read_csv("data/rosetta_data/pdb_index.csv", index_col="pdb_fn")
@@ -109,21 +122,30 @@ class RosettaDatasetSQL(torch.utils.data.Dataset):
         col_names = self.get_col_names()
         self.pdb_col = col_names.index("pdb_fn")
         self.mutations_col = col_names.index("mutations")
-        self.target_cols = None
-        if target_names is not None:
-            self.target_cols = [col_names.index(target_name) for target_name in target_names]
+        self.target_cols = [col_names.index(t) for t in target_names] if target_names else None
 
         # energy means and standard deviations used for standardizing data on-the-fly
-        # note this loads the means and stds for *all* energies, but we only need them for the *target* energies
+        # this loads std params for *all* energies, but we only need them for the *target* energies
         # train_only signifies standardization params only computed on training set... should always be the case
         self.energy_means = None
         self.energy_std = None
-        if split_dir is not None and target_names is not None:
-            # currently split_dir is always set, but check for it in case we want to change that in the future
-            # check if target_names because we don't need to load the standardization params if we're not using them
+        if self.target_cols is not None:
+            # need to load standardization params if this dataset has targets
+            if split_dir is None:
+                raise ValueError("split_dir must be specified if using targets because "
+                                 "that's where standardization parameters are expected "
+                                 "to exist, and they are needed to standardize targets")
+
             standardization_params = self.load_standardization_params(train_only=True)
             self.energy_means = standardization_params["means"]
             self.energy_stds = standardization_params["stds"]
+
+    # function to get full count of rows in database
+    def _get_row_count(self):
+        con = sqlite3.connect(self.db_fn)
+        row_count = con.execute("SELECT COUNT(*) FROM variant").fetchone()[0]
+        con.close()
+        return row_count
 
     def get_col_names(self):
         # create a connection to the database to load up the column names from database
@@ -148,13 +170,13 @@ class RosettaDatasetSQL(torch.utils.data.Dataset):
         return std_params
 
     def __getitem__(self, set_idx):
-        # currently, have to create & destroy the database connection on each call to __getitem__
-        # because it can't pickle the sqlite3 connection object. this introduces overhead.
+        # have to create & destroy the database connection on each call to __getitem__
+        # because it can't pickle the sqlite3 connection object. this introduces overhead
         # future versions of this codebase should move away from sqlite3.
         self.con = sqlite3.connect(self.db_fn)
         self.cur = self.con.cursor()
 
-        # idx argument indexes into the *set*, but the database contains variants from all sets
+        # idx arg indexes into the *set*, but database contains variants from all sets
         # need to add 1 because the database rowid is 1-indexed
         db_idx = self.set_idxs[set_idx] + 1
 
@@ -173,21 +195,26 @@ class RosettaDatasetSQL(torch.utils.data.Dataset):
                                  wt_aa=wt_aa,
                                  # no offset for any of the PDBs used for Rosetta
                                  wt_offset=0,
-                                 # specify indexing = 1_indexed as these variants are coming from the rosetta database
+                                 # specify indexing = 1_indexed as these variants
+                                 # are coming from the rosetta database
                                  indexing="1_indexed")
 
-        # get the target energies as a numpy array -- note this selects only the target_names columns.
+        # get the target energies as a numpy array
+        # note this selects only the target_names columns
         # when standardizing, must make sure to also select corresponding means & stds
         targets = None
-        if self.target_cols is not None:
+        if self.target_cols:
             targets = np.array([result[i] for i in self.target_cols], dtype=np.float32)
             # standardize energies using pre-computed means and standard deviations
-            # if std is zero for any of the energies, then the final standardized result should be zero
+            # if std is zero for any of the energies, then final result should be zero
             target_means = self.energy_means.loc[pdb_fn][self.target_names].to_numpy()
             target_stds = self.energy_stds.loc[pdb_fn][self.target_names].to_numpy()
 
-            targets = np.divide((targets - target_means), target_stds, out=np.zeros_like(targets),
-                                where=target_stds != 0)
+            targets = np.divide(
+                (targets - target_means),
+                target_stds,
+                out=np.zeros_like(targets),
+                where=target_stds != 0)
 
         # must close *and* remove references
         self.cur.close()
