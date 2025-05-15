@@ -234,12 +234,6 @@ if __name__ == "__main__":
 
     # model information
     parser.add_argument(
-        "--task",
-        type=str,
-        help="Rosetta or DMS task",
-        choices=["rosetta", "dms"]
-    )
-    parser.add_argument(
         "--pretrained_ckpt_path",
         type=str,
         help="path to checkpoint",
