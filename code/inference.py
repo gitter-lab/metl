@@ -8,6 +8,7 @@ from typing import Optional, Any
 import pandas as pd
 import pytorch_lightning as pl
 import torch
+from pytorch_lightning import Callback
 from pytorch_lightning.callbacks import ModelSummary
 from torch import nn
 
@@ -210,10 +211,16 @@ def main(args):
         accelerator = "mps"
         devices = 1
 
-    trainer = pl.Trainer(logger=False,
-                         callbacks=[pred_writer, PredictModelSummary(max_depth=-1)],
-                         accelerator=accelerator,
-                         devices=devices)
+    callbacks: list[Callback] = [pred_writer]
+    if args.show_model_summary:
+        callbacks.append(PredictModelSummary(max_depth=-1))
+
+    trainer = pl.Trainer(
+        logger=False,
+        callbacks=callbacks,
+        accelerator=accelerator,
+        devices=devices
+    )
     trainer.predict(lm, datamodule=dm, return_predictions=False)
 
 
@@ -271,6 +278,7 @@ if __name__ == "__main__":
     )
 
     # misc
+    parser.add_argument("--show_model_summary", action="store_true")
     parser.add_argument(
         "--run_dir",
         type=str,
