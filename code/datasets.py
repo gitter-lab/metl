@@ -93,7 +93,7 @@ class RosettaDatasetSQL(torch.utils.data.Dataset):
 
     def __init__(self,
                  db_fn: str,
-                 split_dir: str,
+                 split_dir: Optional[str],
                  set_name: str,
                  # optional because target_names not needed if only doing inference
                  target_names: Optional[list[str]],
@@ -111,6 +111,8 @@ class RosettaDatasetSQL(torch.utils.data.Dataset):
         if set_name == 'full_dataset':
             row_count = self._get_row_count()
             self.set_idxs = list(range(row_count))
+        elif split_dir is None:
+            raise ValueError("split_dir must be specified if not using full_dataset")
         else:
             self.set_idxs = sd.load_split_dir(split_dir)[set_name]
 

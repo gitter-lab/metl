@@ -695,7 +695,7 @@ class RosettaDataModule(pl.LightningDataModule):
 
         parser.add_argument("--encoding",
                             help="which data encoding to use.",
-                            type=str, default="one_hot")
+                            type=str, default="int_seqs")
 
         parser.add_argument("--split_dir",
                             help="the directory containing the train/tune/test split",
@@ -983,11 +983,9 @@ class BasicRosettaDataModule(pl.LightningDataModule):
         )
         parser.add_argument(
             "--split_dir",
-            help="the directory containing the train/tune/test split. "
-                 "this is necessary even if predicting for the full "
-                 "dataset because the split_dir contains the std params",
+            help="the directory containing the train/tune/test split.",
             type=str,
-            required=True
+            default=None
         )
         parser.add_argument(
             "--batch_size",
@@ -1015,7 +1013,7 @@ class BasicRosettaDataModule(pl.LightningDataModule):
 
         self.ds_fn = ds_fn
         self.split_dir = split_dir
-        self.split = sd.load_split_dir(split_dir)
+        self.split = None if split_dir is None else sd.load_split_dir(split_dir)
         self.predict_mode = predict_mode
         self._validate_predict_mode()
         self.batch_size = batch_size
@@ -1065,9 +1063,13 @@ class BasicRosettaDataModule(pl.LightningDataModule):
         return {"x": arr, "pdb_fn": example_pdb_fn}
 
     def _validate_predict_mode(self):
-        valid_split_predict_modes = list(self.split.keys()) + ["full_dataset"]
-        if self.predict_mode not in valid_split_predict_modes:
-            raise ValueError(f"valid predict modes are: {valid_split_predict_modes}")
+        if self.split is None:
+            valid_predict_modes = ["full_dataset"]
+        else:
+            valid_predict_modes = list(self.split.keys()) + ["full_dataset"]
+
+        if self.predict_mode not in valid_predict_modes:
+            raise ValueError(f"valid predict modes are: {valid_predict_modes}")
 
     def _init_pdb_fns(self):
         pdb_fns_path = join(dirname(self.ds_fn), "pdb_fns.txt")
