@@ -20,7 +20,7 @@ def load_checkpoint_run_inference(checkpoint_path, variants, dataset):
     # load the wild-type sequence and the PDB file (needed for 3D RPE) for the dataset
     datasets = utils.load_dataset_metadata()
     wt = datasets[dataset]["wt_aa"]
-    wt_offset = datasets["dataset"]["wt_ofs"]
+    wt_offset = datasets[dataset]["wt_ofs"]
     pdb_fn = datasets[dataset]["pdb_fn"]
 
     variants = variants.split("_")
