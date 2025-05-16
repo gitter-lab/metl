@@ -3,7 +3,7 @@
 import argparse
 import warnings
 from os.path import join, isfile, basename, dirname
-from typing import Optional, Any
+from typing import Optional, Any, Type
 
 import pandas as pd
 import pytorch_lightning as pl
@@ -21,7 +21,36 @@ except ModuleNotFoundError:
 
 import datamodules
 import tasks
+import models
 from training_utils import PredictionWriter
+
+
+def load_pytorch_module(
+        ckpt_fn: str,
+        **override_hparams
+):
+
+    ckpt = torch.load(ckpt_fn, map_location="cpu")
+
+    # load and optionally override saved hyperparameters
+    hparams = ckpt["hyper_parameters"].copy()
+    # override pdb_fns
+    if "pdb_fns" in hparams:
+        hparams["pdb_fns"] = None
+    hparams.update(override_hparams)
+
+    # instantiate model with hyperparameters
+    model = models.Model[hparams["model_name"]].cls(**hparams)
+
+    # align the state dict / model keys
+    state_dict = align_state_dict_keys(
+        ckpt["state_dict"], set(model.state_dict().keys())
+    )
+
+    # Load weights
+    model.load_state_dict(state_dict, strict=True)
+
+    return model
 
 
 class PredictModelSummary(ModelSummary):
@@ -38,29 +67,103 @@ class PredictModelSummary(ModelSummary):
         self.on_fit_start(trainer, pl_module)
 
 
-def find_state_dict_prefix(state_dict, model_keys):
+def find_state_dict_transform(
+        checkpoint_keys: set[str],
+        model_keys: set[str]
+) -> tuple[Optional[str], Optional[str]]:
+
+    """ this assumes the only mismatch between the checkpoint and model keys
+        is due to uniform prefixing (like model., model.model., etc.) and that
+        the checkpoint and the model keys follow the same class structure but
+        were saved with different wrappers...
+
+        this will work for the existing models trained in this repository
     """
-    Finds the correct prefix to transform checkpoint keys to match model keys exactly.
-    Assumes model expects 'model.model.' keys, and checkpoint keys are either:
-    - 'model.model.' (as-is, no change needed)
-    - 'model.' (requires prefixing with 'model.' because checkpoint was converted to be
-                more compatible with pure PyTorch / for metl-pretrained)
-    """
-    prefixes = ["", "model."]  # try no prefix, or add 'model.' to each key
-    model_keys_set = set(model_keys)
 
-    for prefix in prefixes:
-        if prefix:
-            transformed_keys = {f"{prefix}{k}" for k in state_dict}
-        else:
-            transformed_keys = set(state_dict)
+    # make sure we are getting sets (not dict_keys) so we can do set operations
+    checkpoint_keys = set(checkpoint_keys)
+    model_keys = set(model_keys)
 
-        if transformed_keys == model_keys_set:
-            return prefix
-    return None
+    # if the keys already match, no transform is needed
+    if checkpoint_keys == model_keys:
+        return "", ""
+
+    # find the common prefix between the checkpoint and model keys
+    # this loops through all pairs, but under our assumptions, we could
+    # just check the first pair... however, overhead is minimal
+    for ckpt_key in checkpoint_keys:
+        for model_key in model_keys:
+
+            if ckpt_key.endswith(model_key):
+                # checkpoint key ends with model key
+                # need to strip the prefix from the ckpt key to match the model key
+                strip_prefix = ckpt_key[: -len(model_key)]
+                # check if this transformation works
+                transformed_keys = {k[len(strip_prefix):] for k in checkpoint_keys}
+                if transformed_keys == model_keys:
+                    return strip_prefix, ""
+
+            elif model_key.endswith(ckpt_key):
+                # model key ends with checkpoint key
+                # need to add the prefix to the ckpt key to match the model key
+                add_prefix = model_key[: -len(ckpt_key)]
+                # check if this transformation works
+                transformed_keys = {f"{add_prefix}{k}" for k in checkpoint_keys}
+                if transformed_keys == model_keys:
+                    return "", add_prefix
+
+    return None, None
 
 
-def load_lightning_module(cls, ckpt, strict=True, **override_hparams):
+def transform_state_dict(
+    state_dict: dict[str, Any],
+    strip_prefix: str = "",
+    add_prefix: str = ""
+) -> dict[str, Any]:
+
+    new_state_dict = {}
+    for k, v in state_dict.items():
+        if strip_prefix:
+            if not k.startswith(strip_prefix):
+                raise ValueError(f"Key '{k}' does not start with prefix '{strip_prefix}'")
+            k = k[len(strip_prefix):]
+        new_key = f"{add_prefix}{k}"
+        new_state_dict[new_key] = v
+    return new_state_dict
+
+
+def align_state_dict_keys(
+    checkpoint_state_dict: dict[str, Any],
+    model_state_dict_keys: set[str],
+    *,
+    warn: bool = True
+) -> dict[str, Any]:
+
+    ckpt_keys = set(checkpoint_state_dict.keys())
+    strip_prefix, add_prefix = find_state_dict_transform(ckpt_keys, model_state_dict_keys)
+
+    if (strip_prefix, add_prefix) == (None, None):
+        raise RuntimeError("Unable to match checkpoint keys to model keys exactly.")
+
+    if (strip_prefix, add_prefix) == ("", ""):
+        return checkpoint_state_dict  # No change needed
+
+    if warn:
+        warnings.warn(
+            f"Transforming checkpoint keys: "
+            f"strip_prefix='{strip_prefix}', add_prefix='{add_prefix}'"
+        )
+
+    return transform_state_dict(checkpoint_state_dict, strip_prefix, add_prefix)
+
+
+def load_lightning_module(
+    cls: Type,
+    ckpt: dict,
+    strict: bool = True,
+    **override_hparams
+):
+
     # Load and optionally override saved hyperparameters
     hparams = ckpt["hyper_parameters"].copy()
     hparams.update(override_hparams)
@@ -68,20 +171,14 @@ def load_lightning_module(cls, ckpt, strict=True, **override_hparams):
     # Instantiate model with hyperparameters
     model = cls(**hparams)
 
-    # Determine correct prefix to apply (if any)
-    prefix = find_state_dict_prefix(ckpt["state_dict"], model.state_dict().keys())
-    if prefix is None:
-        raise RuntimeError("Unable to match checkpoint keys to model keys exactly.")
-
-    # Apply prefix if needed
-    if prefix:
-        warnings.warn(f"Prefixing checkpoint keys with '{prefix}' to match model format.")
-        state_dict = {f"{prefix}{k}": v for k, v in ckpt["state_dict"].items()}
-    else:
-        state_dict = ckpt["state_dict"]
+    # Align the state dict / model keys
+    state_dict = align_state_dict_keys(
+        ckpt["state_dict"], set(model.state_dict().keys())
+    )
 
     # Load weights
     model.load_state_dict(state_dict, strict=strict)
+
     return model
 
 
