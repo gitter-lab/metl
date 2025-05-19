@@ -90,3 +90,7 @@ See the help message for an explanation of all the arguments
 ```bash
 python code/code/train_target_model.py --help
 ```
+
+# Running inference
+
+See the notebook [inference.ipynb](notebooks/inference.ipynb) for examples of how to run inference with METL models trained in this repository.

@@ -246,7 +246,7 @@ class PredictionWriter(BasePredictionWriter):
             raise ValueError("Unknown batch_mode or batch_format combination. This shouldn't happen.")
 
     def write_on_epoch_end(self, trainer, pl_module, predictions, batch_indices):
-        # i *think* we have to use predictions[0] because first layer of lists is for dataloaders
+        # Use predictions[0] because first layer of lists is dataloaders
         predictions_numpy = torch.cat(predictions[0], dim=0).cpu().numpy()
         save_fn = os.path.join(self.output_dir, f"{self.save_fn_base}.npy")
         np.save(save_fn, predictions_numpy)
