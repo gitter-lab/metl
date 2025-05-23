@@ -281,6 +281,7 @@ def main(args: argparse.Namespace):
                    seq_encoding_len=dm.seq_encoding_len,
                    pdb_fns=dm.unique_pdb_fns,
                    example_input_array=dm.example_input_array,
+                   dm=dm,
                    **vars(args))
 
     callbacks = init_callbacks(args, log_dir, dm)
