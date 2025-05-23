@@ -100,6 +100,11 @@ class DMSDataModule(pl.LightningDataModule):
                             help="number of workers for the data loader",
                             type=int, default=4)
 
+        parser.add_argument("--num_classes",
+                            help="number of classes if doing ordinal regression, necessary for MSE importance weighting in loss",
+                            type=int,
+                            default=None)
+
         return parser
 
     def __init__(self,
