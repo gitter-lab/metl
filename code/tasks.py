@@ -210,23 +210,6 @@ class DMSTask(pl.LightningModule):
                             An input of "1" will use the probability of the second-lowest rank bin (the lowest bin always has P(dead) = 1). 
                             An input of "N" (where N is the number of bins) will use the probability of the highest-ranking bin. 
                             This setting does not affect the saved predictions—raw_predictions and all bin probabilities will be saved regardless.""")
-        p.add_argument("--importance_weights",
-                            help= """Weights to assign to ordinal classes. For MSE loss, the weight vector should have dimension equal to the number of classes. 
-                                    For ranking tasks such as CORN or CORAL loss, the vector dimension should be (num_classes - 1). 
-                                    If None is passed (i.e., not specified), the importance weights will be automatically calculated based on 
-                                    class prevalence in the training set. 
-                                    Note: To use importance weights, class labels must range from 0 to N-1, where N is the number of classes.""",
-                            type=list, default=None, nargs='+')
-        p.add_argument("--use_importance_weights",
-                            help="""If you wish to use importance weights, you must specify this flag.
-                                    If --importance_weights is not provided, they will be automatically calculated based on 
-                                    class prevalence in the training set.
-                                    Note: To use importance weights, class labels must range from 0 to N-1, 
-                                    where N-1 is the highest-ranking class.
-                                    Must specify --num_classes if using importance weights with MSE loss.""",
-                                #todo: provide an error message telling the user that you must pass in these
-                                # labels for ordinal work.
-                             action="store_true")
         return p
     def __init__(self,
                  # the model to use (see models.py)
@@ -257,10 +240,7 @@ class DMSTask(pl.LightningModule):
                  loss_func: str = "mse",
                  #specific corn loss feature, which feature to use for metrics
                  corn_pred_feature: str = 'raw_predictions',
-                 use_importance_weights: bool = False,
-                 importance_weights: list = None,
-                 # pass in the datamodule to be used for importance weights
-                 dm: DMSDataModule =None,
+                 importance_weights: torch.tensor = None,
                  *args, **kwargs):
 
         super().__init__()
@@ -299,6 +279,14 @@ class DMSTask(pl.LightningModule):
         ## corn specific loss terms
         self.loss_func = loss_func
         self.corn_pred_feature = corn_pred_feature
+
+        # importance weights
+        if importance_weights is None:
+            self.importance_weights=None
+        else:
+            self.importance_weights= torch.tensor(importance_weights)
+
+
         # if the model type is a TransferModel, we also want to save the
         # hyperparameters of the pre-trained model that we are transferring from
         # this will help reconstruct the model when loading from a checkpoint
@@ -311,56 +299,6 @@ class DMSTask(pl.LightningModule):
                 # a pytorch_lightning.utilities.parsing.AttributeDict, and we want to be fully pure-pytorch compatible
                 pretrained_hparams = dict(self.model.pretrained_hparams)
                 self.save_hyperparameters({"pretrained_hparams": pretrained_hparams})
-
-
-        # class imbalance training with an ordinal function
-        if importance_weights is not None and use_importance_weights == False:
-            raise ValueError(
-                """--importance_weights (used for class imbalance training on ordinal data) 
-            was specified, however, the flag --use_importance_weights was not specified!
-            Please pass in the --use_importance_weights flag to use --importance_weights, 
-            or do not specify --importance_weights at all."""
-            )
-        if use_importance_weights:
-            if importance_weights is None:
-
-                # going to make an assumption the data must be labeled from 0 to N-1. (Where N is number of classes)
-
-                unique, counts = np.unique(dm._get_raw_targets("train").flatten(), return_counts=True)
-                count_dict = dict(sorted(zip(unique, counts)))
-                count_dict = {int(k): v for k, v in count_dict.items()}
-
-                if loss_func=='corn':
-                    nb_classes = kwargs['top_net_output_dim'] + 1
-                    raw_importance_weights = torch.tensor([(count_dict[i]+count_dict[i+1])/2 for i in np.arange(0,nb_classes-1,1)])
-                    importance_weights_inverse = (1 / raw_importance_weights)
-                    self.importance_weights = importance_weights_inverse / importance_weights_inverse.sum()
-                elif loss_func=='mse':
-                    nb_classes = kwargs['num_classes']
-                    raw_importance_weights = torch.tensor([count_dict[i] for i in np.arange(0, nb_classes, 1)])
-                    importance_weights_inverse=(1 / raw_importance_weights)
-                    self.importance_weights =importance_weights_inverse/ importance_weights_inverse.sum()
-            else:
-                # the importance weights were specified by the user
-                importance_weights = [float(im[0]) for im in importance_weights]
-                # tensor([0.0981, 0.1324, 0.1738, 0.5957])
-                # tensor([0.4048, 0.3000, 0.2286, 0.0667])
-                if loss_func == 'corn':
-                    nb_classes = kwargs['top_net_output_dim'] + 1
-                    assert len(importance_weights) == nb_classes - 1, \
-                        'Importance length must be N-1 for ordinal based loss, where N is the number of output classes'
-                elif loss_func=='mse':
-                    nb_classes = kwargs['num_classes']
-                    assert len(importance_weights) == nb_classes , \
-                        'Importance length must be N for MSE, where N is the number of output classes'
-                else:
-                    raise ValueError('must choose a valid loss function from specified options')
-
-                self.importance_weights = torch.tensor(importance_weights)
-
-        else:
-            # we don't want to use importance weights, the default case
-            self.importance_weights = None
 
     def forward(self, x, **kwargs):
         return self.model(x, **kwargs)
@@ -390,7 +328,7 @@ class DMSTask(pl.LightningModule):
 
                 return outputs, loss
             elif self.loss_func == "corn":
-                print(self.importance_weights)
+                # print(self.importance_weights)
                 num_classes = outputs.shape[1] + 1
                 loss = self.loss_corn(outputs, labels, num_classes,self.importance_weights)
                 outputs = self._shared_step_corn_inference(outputs)

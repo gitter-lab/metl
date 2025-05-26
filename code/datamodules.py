@@ -104,6 +104,23 @@ class DMSDataModule(pl.LightningDataModule):
                             help="number of classes if doing ordinal regression, necessary for MSE importance weighting in loss",
                             type=int,
                             default=None)
+        parser.add_argument("--set_importance_weights",
+                            help= """Weights to assign to ordinal classes. For MSE loss, the weight vector should have dimension equal to the number of classes. 
+                                    For ranking tasks such as CORN or CORAL loss, the vector dimension should be (num_classes - 1). 
+                                    If None is passed (i.e., not specified), the importance weights will be automatically calculated based on 
+                                    class prevalence in the training set. 
+                                    Note: To use importance weights, class labels must range from 0 to N-1, where N is the number of classes.""",
+                            type=list, default=None, nargs='+')
+        parser.add_argument("--use_importance_weights",
+                            help="""If you wish to use importance weights, you must specify this flag.
+                                    If --importance_weights is not provided, they will be automatically calculated based on 
+                                    class prevalence in the training set.
+                                    Note: To use importance weights, class labels must range from 0 to N-1, 
+                                    where N-1 is the highest-ranking class.
+                                    Must specify --num_classes if using importance weights with MSE loss.""",
+                                #todo: provide an error message telling the user that you must pass in these
+                                # labels for ordinal work.
+                             action="store_true")
 
         return parser
 
@@ -127,6 +144,8 @@ class DMSDataModule(pl.LightningDataModule):
                  batch_size: int = 32,
                  predict_mode: str = "all_sets",
                  num_dataloader_workers: int = 4,
+                 use_importance_weights: bool = False,
+                 set_importance_weights: list = None,
                  *args, **kwargs):
 
         super().__init__()
@@ -227,6 +246,60 @@ class DMSDataModule(pl.LightningDataModule):
                 sample_encoded_data_batch,
                 sample_aux_batch
             )
+
+
+
+        # class imbalance training with an ordinal function
+        if set_importance_weights is not None and use_importance_weights == False:
+            raise ValueError(
+                """--importance_weights (used for class imbalance training on ordinal data) 
+            was specified, however, the flag --use_importance_weights was not specified!
+            Please pass in the --use_importance_weights flag to use --importance_weights, 
+            or do not specify --importance_weights at all."""
+            )
+
+        loss_func = kwargs['loss_func']
+        nb_classes = kwargs['num_classes']
+        if use_importance_weights:
+            if set_importance_weights is None:
+
+                # going to make an assumption the data must be labeled from 0 to N-1. (Where N is number of classes)
+
+                unique, counts = np.unique(self._get_raw_targets("train").flatten(), return_counts=True)
+                count_dict = dict(sorted(zip(unique, counts)))
+                count_dict = {int(k): v for k, v in count_dict.items()}
+
+                if loss_func == 'corn':
+                    # we weight via each binary output tasks (p(>k))
+                    raw_importance_weights = torch.tensor(
+                        [(count_dict[i] + count_dict[i + 1]) / 2 for i in np.arange(0, nb_classes - 1, 1)])
+                    importance_weights_inverse = (1 / raw_importance_weights)
+                    importance_weights_np = (importance_weights_inverse / importance_weights_inverse.sum()).numpy()
+                    self.importance_weights = [float(w) for w in importance_weights_np]
+                elif loss_func == 'mse':
+                    raw_importance_weights = torch.tensor([count_dict[i] for i in np.arange(0, nb_classes, 1)])
+                    importance_weights_inverse = (1 / raw_importance_weights)
+                    importance_weights_np = (importance_weights_inverse / importance_weights_inverse.sum()).numpy()
+                    self.importance_weights = [float(w) for w in importance_weights_np]
+            else:
+                # the importance weights were specified by the user
+                importance_weights = [float(im[0]) for im in set_importance_weights]
+                # tensor([0.0981, 0.1324, 0.1738, 0.5957])
+                # tensor([0.4048, 0.3000, 0.2286, 0.0667])
+                if loss_func == 'corn':
+                    assert len(importance_weights) == nb_classes - 1, \
+                        'Importance length must be N-1 for ordinal based loss, where N is the number of output classes'
+                elif loss_func == 'mse':
+                    assert len(importance_weights) == nb_classes, \
+                        'Importance length must be N for MSE, where N is the number of output classes'
+                else:
+                    raise ValueError('must choose a valid loss function from specified options')
+
+                self.importance_weights = importance_weights
+
+        else:
+            # we don't want to use importance weights, the default case
+            self.importance_weights = None
 
     def _init_pdb_fn(self, pdb_fn):
         if pdb_fn == "auto" and "pdb_fn" in self.ds_metadata:
