@@ -110,7 +110,7 @@ class DMSDataModule(pl.LightningDataModule):
                                     If None is passed (i.e., not specified), the importance weights will be automatically calculated based on 
                                     class prevalence in the training set. 
                                     Note: To use importance weights, class labels must range from 0 to N-1, where N is the number of classes.""",
-                            type=list, default=None, nargs='+')
+                            type=float, default=None, nargs='+')
         parser.add_argument("--use_importance_weights",
                             help="""If you wish to use importance weights, you must specify this flag.
                                     If --importance_weights is not provided, they will be automatically calculated based on 
@@ -283,7 +283,7 @@ class DMSDataModule(pl.LightningDataModule):
                     self.importance_weights = [float(w) for w in importance_weights_np]
             else:
                 # the importance weights were specified by the user
-                importance_weights = [float(im[0]) for im in set_importance_weights]
+                importance_weights =  set_importance_weights
                 # tensor([0.0981, 0.1324, 0.1738, 0.5957])
                 # tensor([0.4048, 0.3000, 0.2286, 0.0667])
                 if loss_func == 'corn':
