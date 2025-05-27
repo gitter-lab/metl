@@ -351,6 +351,10 @@ class DMSTask(pl.LightningModule):
         print(f"labels device: {labels.device}")
         print(f"class_weights device: {class_weights.device}")
 
+        class_weights = class_weights.to(labels.device)
+
+        print(f"class_weights device: {class_weights.device}")
+
         # Get weights per sample based on class label
         sample_weights = class_weights[labels.long()]
         print(f"sample_weights device: {sample_weights.device}")
