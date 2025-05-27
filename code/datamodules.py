@@ -264,10 +264,15 @@ class DMSDataModule(pl.LightningDataModule):
             if set_importance_weights is None:
 
                 # going to make an assumption the data must be labeled from 0 to N-1. (Where N is number of classes)
-
+                count_dict = {i: 0 for i in np.arange(0,nb_classes,1)}
                 unique, counts = np.unique(self._get_raw_targets("train").flatten(), return_counts=True)
-                count_dict = dict(sorted(zip(unique, counts)))
-                count_dict = {int(k): v for k, v in count_dict.items()}
+                count_dict_true_counts = dict(sorted(zip(unique, counts)))
+                for k, v in count_dict_true_counts.items():
+                    if v == 0 :
+                        # we can't have divide by zero errors
+                        count_dict[int(k)] = 0.1
+                    else:
+                        count_dict[int(k)]=v
 
                 if loss_func == 'corn':
                     # we weight via each binary output tasks (p(>k))
