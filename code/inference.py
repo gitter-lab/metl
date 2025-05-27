@@ -185,17 +185,27 @@ def load_lightning_module(
 def main(args):
 
     # determine whether we are loading a DMSTask or RosettaTask checkpoint
-    # based on the presence of the 'save_hyperparams' argument in the checkpoint
-    # this is not an ideal method of determining the task, but it works because
-    # the DMSTask class has a 'save_hyperparams' argument, while RosettaTask does not
-    # todo: add placeholder arguments to both classes specifically for this purpose
     ckpt = torch.load(args.pretrained_ckpt_path, map_location="cpu")
-    if "save_hyperparams" in ckpt["hyper_parameters"]:
-        # lm = tasks.DMSTask.load_from_checkpoint(args.pretrained_ckpt_path, pdb_fns=None)
-        task_class = tasks.DMSTask
+    if "_task_type" in ckpt["hyper_parameters"]:
+        task_type = ckpt["hyper_parameters"]["_task_type"]
+        if task_type == "dms":
+            task_class = tasks.DMSTask
+        elif task_type == "rosetta":
+            task_class = tasks.RosettaTask
+        else:
+            raise ValueError(f"Unknown task type: {task_type}")
     else:
-        # lm = tasks.RosettaTask.load_from_checkpoint(args.pretrained_ckpt_path, pdb_fns=None)
-        task_class = tasks.RosettaTask
+        # fallback to checking for presence of 'save_hyperparams'
+        # based on the presence of the 'save_hyperparams' argument in the checkpoint
+        # this is not an ideal method of determining the task, but it works because
+        # the DMSTask class has a 'save_hyperparams' argument, while RosettaTask does not
+        # this will work for legacy models trained in this repository
+        if "save_hyperparams" in ckpt["hyper_parameters"]:
+            # lm = tasks.DMSTask.load_from_checkpoint(args.pretrained_ckpt_path, pdb_fns=None)
+            task_class = tasks.DMSTask
+        else:
+            # lm = tasks.RosettaTask.load_from_checkpoint(args.pretrained_ckpt_path, pdb_fns=None)
+            task_class = tasks.RosettaTask
 
     # using a custom checkpoint loading solution which supports the "converted"
     # model checkpoints found in the metl-pretrained repo

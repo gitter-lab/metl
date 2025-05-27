@@ -57,6 +57,8 @@ class RosettaTask(pl.LightningModule):
                  warmup_steps: float = .02,
                  # example input array from the datamodule
                  example_input_array: torch.Tensor = None,
+                 # this is a static hyperparameter used to identify the task type
+                 _task_type: str = "rosetta",
                  # all other trainer and model params
                  *args, **kwargs):
 
@@ -212,6 +214,8 @@ class DMSTask(pl.LightningModule):
                  phase2_lr_ratio: float = 1.0,
                  # example input array from the datamodule
                  example_input_array: torch.Tensor = None,
+                 # this is a static hyperparameter used to identify the task type
+                 _task_type: str = "dms",
                  # all other trainer and model params
                  save_hyperparams=True,
                  *args, **kwargs):
