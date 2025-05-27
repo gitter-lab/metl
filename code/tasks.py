@@ -347,25 +347,25 @@ class DMSTask(pl.LightningModule):
         labels = labels.view(-1)
 
         # Debug: Print devices
-        print(f"outputs device: {outputs.device}")
-        print(f"labels device: {labels.device}")
-        print(f"class_weights device: {class_weights.device}")
+        # print(f"outputs device: {outputs.device}")
+        # print(f"labels device: {labels.device}")
+        # print(f"class_weights device: {class_weights.device}")
 
         class_weights = class_weights.to(labels.device)
 
-        print(f"class_weights device: {class_weights.device}")
+        # print(f"class_weights device: {class_weights.device}")
 
         # Get weights per sample based on class label
         sample_weights = class_weights[labels.long()]
-        print(f"sample_weights device: {sample_weights.device}")
+        # print(f"sample_weights device: {sample_weights.device}")
 
         # Compute element-wise squared error
         mse_per_sample = (outputs - labels.float()) ** 2
-        print(f"mse_per_sample device: {mse_per_sample.device}")
+        # print(f"mse_per_sample device: {mse_per_sample.device}")
 
         # Apply weights
         weighted_mse = sample_weights * mse_per_sample
-        print(f"weighted_mse device: {weighted_mse.device}")
+        # print(f"weighted_mse device: {weighted_mse.device}")
 
         # Return mean of weighted loss
         return weighted_mse.mean()
