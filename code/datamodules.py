@@ -268,11 +268,11 @@ class DMSDataModule(pl.LightningDataModule):
                 unique, counts = np.unique(self._get_raw_targets("train").flatten(), return_counts=True)
                 count_dict_true_counts = dict(sorted(zip(unique, counts)))
                 for k, v in count_dict_true_counts.items():
-                    if v == 0 :
-                        # we can't have divide by zero errors
-                        count_dict[int(k)] = 0.1
-                    else:
-                        count_dict[int(k)]=v
+                    count_dict[int(k)]=v
+
+                for k, v in count_dict.items():
+                    if v == 0:
+                        count_dict[k] = 0.1
 
                 if loss_func == 'corn':
                     # we weight via each binary output tasks (p(>k))
