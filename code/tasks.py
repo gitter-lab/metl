@@ -57,6 +57,8 @@ class RosettaTask(pl.LightningModule):
                  warmup_steps: float = .02,
                  # example input array from the datamodule
                  example_input_array: torch.Tensor = None,
+                 # this is a static hyperparameter used to identify the task type
+                 _task_type: str = "rosetta",
                  # all other trainer and model params
                  *args, **kwargs):
 
@@ -90,7 +92,7 @@ class RosettaTask(pl.LightningModule):
 
     def _shared_step(self, data_batch, batch_idx, compute_loss=True):
         inputs = data_batch["inputs"]
-        labels = data_batch["targets"]
+        labels = data_batch["targets"] if "targets" in data_batch else None
         # the pdb file if one is provided by the dataloader (for relative position 3D)
         # we only support one pdb file per batch, so just choose the first one (index 0)
         # in the future, if we support multiple per batch, we can pass in all the pdb files
@@ -212,6 +214,8 @@ class DMSTask(pl.LightningModule):
                  phase2_lr_ratio: float = 1.0,
                  # example input array from the datamodule
                  example_input_array: torch.Tensor = None,
+                 # this is a static hyperparameter used to identify the task type
+                 _task_type: str = "dms",
                  # all other trainer and model params
                  save_hyperparams=True,
                  *args, **kwargs):
@@ -266,7 +270,9 @@ class DMSTask(pl.LightningModule):
 
     def _shared_step(self, data_batch, batch_idx, compute_loss=True):
         inputs = data_batch["inputs"]
-        labels = data_batch["targets"]
+
+        # labels might not be provided if we are doing inference
+        labels = data_batch["targets"] if "targets" in data_batch else None
 
         # the pdb file if one is provided by the dataloader (for relative position 3D)
         # we only support one pdb file per batch, so just choose the first one (index 0)

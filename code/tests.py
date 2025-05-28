@@ -1,25 +1,37 @@
 """ testing code """
-import metl
 import torch
 from argparse import ArgumentParser
 
 try:
     from . import utils
+    from . import inference
+    from . import encode as enc
 except ImportError:
     import utils
+    import inference
+    import encode as enc
 
 def load_checkpoint_run_inference(checkpoint_path, variants, dataset):
     """ loads a finetuned 3D model from a checkpoint and scores variants with the model """
-    model, data_encoder =  metl.get_from_checkpoint(checkpoint_path)
+
+    # the Lightning checkpoint from the finetuning we performed above
+    model = inference.load_pytorch_module(checkpoint_path)
 
     # load the wild-type sequence and the PDB file (needed for 3D RPE) for the dataset
     datasets = utils.load_dataset_metadata()
     wt = datasets[dataset]["wt_aa"]
+    wt_offset = datasets[dataset]["wt_ofs"]
     pdb_fn = datasets[dataset]["pdb_fn"]
 
     variants = variants.split("_")
 
-    encoded_variants = data_encoder.encode_variants(wt, variants)
+    encoded_variants = enc.encode(
+        encoding="int_seqs",
+        variants=variants,
+        wt_aa=wt,
+        wt_offset=wt_offset,
+        indexing="0_indexed"
+    )
 
     # set model to eval mode
     model.eval()
