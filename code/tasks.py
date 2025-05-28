@@ -328,9 +328,13 @@ class DMSTask(pl.LightningModule):
 
                 return outputs, loss
             elif self.loss_func == "corn":
-                # print(self.importance_weights)
+                # if we are using the corn loss then get the corn loss
                 num_classes = outputs.shape[1] + 1
                 loss = self.loss_corn(outputs, labels, num_classes,self.importance_weights)
+                # take the logits and convert them to probabilities and labels
+                # return a matrix where first column is predictions ,
+                # second is probability second lowest bin, and final is
+                # probability of Nth bin.
                 outputs = self._shared_step_corn_inference(outputs)
                 return outputs, loss
 
@@ -342,6 +346,8 @@ class DMSTask(pl.LightningModule):
             return outputs
 
     def weighted_mse_loss(self, outputs, labels, class_weights):
+        # weigthed MSE loss that weights by sample.
+
         # Ensure outputs are flattened
         outputs = outputs.view(-1)
         labels = labels.view(-1)
@@ -436,6 +442,15 @@ class DMSTask(pl.LightningModule):
         return optimizer_config.get_optimizer_config(trainable_parameters, self.trainer.estimated_stepping_batches)
 
     def loss_corn(self,logits, y_train, num_classes, importance_weights=None):
+        '''
+        code authored by Sebastian Raschka
+        https://github.com/Raschka-research-group/coral-pytorch/blob/main/coral_pytorch/losses.py
+        :param logits:logits of bins
+        :param y_train: true labels
+        :param num_classes: number of classes
+        :param importance_weights: per task weights, dimension N-1, where N is number of bins.
+        :return: corn loss value
+        '''
         sets = []
 
         for i in range(num_classes - 1):
@@ -468,14 +483,23 @@ class DMSTask(pl.LightningModule):
         return losses / num_examples
 
     def proba_from_logits(self, logits):
+        '''
+        code authored by Sebastian Raschka
+        https://github.com/Raschka-research-group/coral-pytorch/blob/main/coral_pytorch/dataset.py
+        :param logits:
+        :return:
+        '''
         # new specific functions only for CORN loss
         probas = torch.sigmoid(logits)
         probas = torch.cumprod(probas, dim=1)
         return probas
 
     def label_from_logits(self, logits):
-        """ Converts logits to class labels.
+        """
+        code authored by Sebastian Raschka
+        Converts logits to class labels.
         This is function is specific to CORN.
+        https://github.com/Raschka-research-group/coral-pytorch/blob/main/coral_pytorch/dataset.py
         """
         probas = torch.sigmoid(logits)
         probas = torch.cumprod(probas, dim=1)
