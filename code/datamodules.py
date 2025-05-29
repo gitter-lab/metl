@@ -104,6 +104,7 @@ class DMSDataModule(pl.LightningDataModule):
 
     def __init__(self,
                  ds_name: str,
+                 ds: Optional[pd.DataFrame] = None,
                  pdb_fn: Optional[str] = "auto",
                  encoding: str = "one_hot",
                  flatten_encoded_data: bool = False,
@@ -166,7 +167,12 @@ class DMSDataModule(pl.LightningDataModule):
         self.num_dataloader_workers = num_dataloader_workers
 
         # load the pandas dataframe for the dataset
-        self.ds = utils.load_dataset(ds_name=ds_name)
+        if ds is None:
+            self.ds = utils.load_dataset(ds_name=ds_name)
+        else:
+            # optionally provide the dataframe as input instead of loading from disk
+            # makes experimenting with different scores a bit easier during development
+            self.ds = ds
 
         # set up and verify target_names (must be called after dataset is loaded in self.ds)
         self.target_names = None
