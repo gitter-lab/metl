@@ -277,7 +277,7 @@ class DMSDataModule(pl.LightningDataModule):
                     if v == 0:
                         count_dict[k] = 0.1
 
-                if loss_func == 'corn':
+                if loss_func == 'corn' or loss_func=='coral':
                     # we weight via each binary output tasks (p(>k))
                     raw_importance_weights = torch.tensor(
                         [(count_dict[i] + count_dict[i + 1]) / 2 for i in np.arange(0, nb_classes - 1, 1)])
@@ -294,7 +294,7 @@ class DMSDataModule(pl.LightningDataModule):
                 importance_weights =  set_importance_weights
                 # tensor([0.0981, 0.1324, 0.1738, 0.5957])
                 # tensor([0.4048, 0.3000, 0.2286, 0.0667])
-                if loss_func == 'corn':
+                if loss_func == 'corn' or loss_func == 'coral':
                     assert len(importance_weights) == nb_classes - 1, \
                         'Importance length must be N-1 for ordinal based loss, where N is the number of output classes'
                 elif loss_func == 'mse':
