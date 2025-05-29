@@ -197,15 +197,15 @@ class DMSTask(pl.LightningModule):
         parser_with_optimizer_args = training_utils.OptimizerConfig.add_model_specific_args(parent_parser)
         # add arguments related to the loss function
         p = ArgumentParser(parents=[parser_with_optimizer_args], add_help=False)
-        p.add_argument('--loss_func', type=str, default="mse", choices=["mse", "corn"] ,
+        p.add_argument('--loss_func', type=str, default="mse", choices=["mse", "corn","coral"] ,
                        help= """Specifies the loss function to use. "mse" refers to mean squared error. 
                                 For ordinal data, consider using the "corn" loss function, which requires also specifying 
                                 --top_net_output_dim (this should be equal to N-1, where N is the number of bins in the data). 
                                 For more details, see the paper:
                                     Deep Neural Networks for Rank-Consistent Ordinal Regression Based on Conditional Probabilities — 
                                     https://doi.org/10.48550/arXiv.2111.08851""")
-        p.add_argument('--corn_pred_feature', type=str, default="raw_predictions",
-                       help="""Specifies which CORN feature to use for calculating test metrics and generating scatter plots (for training log purposes only). 
+        p.add_argument('--corn_coral_log_feature', type=str, default="raw_predictions",
+                       help="""Specifies which CORN or CORAL feature to use for calculating test metrics and generating scatter plots (for training log purposes only). 
                             "raw_predictions" refers to the default behavior: selecting the highest-ranking bin with a probability greater than 0.5. 
                             An input of "1" will use the probability of the second-lowest rank bin (the lowest bin always has P(dead) = 1). 
                             An input of "N" (where N is the number of bins) will use the probability of the highest-ranking bin. 
@@ -239,7 +239,7 @@ class DMSTask(pl.LightningModule):
                  save_hyperparams=True,
                  loss_func: str = "mse",
                  #specific corn loss feature, which feature to use for metrics
-                 corn_pred_feature: str = 'raw_predictions',
+                 corn_coral_log_feature: str = 'raw_predictions',
                  importance_weights: torch.tensor = None,
                  *args, **kwargs):
 
@@ -278,7 +278,7 @@ class DMSTask(pl.LightningModule):
 
         ## corn specific loss terms
         self.loss_func = loss_func
-        self.corn_pred_feature = corn_pred_feature
+        self.corn_coral_log_feature = corn_coral_log_feature
 
         # importance weights
         if importance_weights is None:
@@ -330,51 +330,34 @@ class DMSTask(pl.LightningModule):
             elif self.loss_func == "corn":
                 # if we are using the corn loss then get the corn loss
                 num_classes = outputs.shape[1] + 1
-                loss = self.loss_corn(outputs, labels, num_classes,self.importance_weights)
+                loss = self.loss_corn(outputs, labels,num_classes,self.importance_weights)
                 # take the logits and convert them to probabilities and labels
                 # return a matrix where first column is predictions ,
                 # second is probability second lowest bin, and final is
                 # probability of Nth bin.
                 outputs = self._shared_step_corn_inference(outputs)
                 return outputs, loss
-
+            elif self.loss_func ==  "coral":
+                # input must be integers
+                num_classes = outputs.shape[1] + 1
+                labels=labels.to(torch.int)
+                num_classes = int(num_classes)
+                levels=self.levels_from_labelbatch(labels,num_classes)
+                loss=self.coral_loss(outputs,levels.type_as(outputs),self.importance_weights)
+                outputs = self._shared_step_coral_inference(outputs)
+                return outputs, loss
+            else:
+                raise ValueError(f'{self.loss_func} is an invalid loss_func.')
         else:
             if self.loss_func == "mse":
                 pass
             elif self.loss_func == "corn":
                 outputs=self._shared_step_corn_inference(outputs)
+            elif self.loss_func =="coral":
+                outputs=self._shared_step_coral_inference(outputs)
+            else:
+                raise ValueError(f'{self.loss_func} is an invalid loss_func.')
             return outputs
-
-    def weighted_mse_loss(self, outputs, labels, class_weights):
-        # weigthed MSE loss that weights by sample.
-
-        # Ensure outputs are flattened
-        outputs = outputs.view(-1)
-        labels = labels.view(-1)
-
-        # Debug: Print devices
-        # print(f"outputs device: {outputs.device}")
-        # print(f"labels device: {labels.device}")
-        # print(f"class_weights device: {class_weights.device}")
-
-        class_weights = class_weights.to(labels.device)
-
-        # print(f"class_weights device: {class_weights.device}")
-
-        # Get weights per sample based on class label
-        sample_weights = class_weights[labels.long()]
-        # print(f"sample_weights device: {sample_weights.device}")
-
-        # Compute element-wise squared error
-        mse_per_sample = (outputs - labels.float()) ** 2
-        # print(f"mse_per_sample device: {mse_per_sample.device}")
-
-        # Apply weights
-        weighted_mse = sample_weights * mse_per_sample
-        # print(f"weighted_mse device: {weighted_mse.device}")
-
-        # Return mean of weighted loss
-        return weighted_mse.mean()
 
     def training_step(self, data_batch, batch_idx):
         outputs, loss = self._shared_step(data_batch, batch_idx)
@@ -392,9 +375,9 @@ class DMSTask(pl.LightningModule):
         outputs, loss = self._shared_step(data_batch, batch_idx)
 
 
-        if self.loss_func=='corn':
+        if self.loss_func=='corn' or self.loss_func=='coral':
             # if we have a corn loss we need the user specified prediction feature
-            outputs = self._get_corn_outputs(outputs)
+            outputs = self._get_coral_corn_outputs(outputs)
 
         self.log("test_loss", loss)
 
@@ -411,9 +394,11 @@ class DMSTask(pl.LightningModule):
 
         outputs = self._shared_step(data_batch, batch_idx, compute_loss=False)
 
-        if self.loss_func=='corn':
+        if self.loss_func=='corn' or self.loss_func=='coral':
             # if we have a corn loss we need the user specified prediction feature
-            log_prediction = self._get_corn_outputs(outputs)
+            # for logging purpposes only
+
+            log_prediction = self._get_coral_corn_outputs(outputs)
             # return two values to save all probabilities (included in outputs)
             # while also having a prediction for scatterplots, test metrics, etc.
             # predictions will be handled by training_utils.parse_raw_preds_and_save()
@@ -441,10 +426,183 @@ class DMSTask(pl.LightningModule):
 
         return optimizer_config.get_optimizer_config(trainable_parameters, self.trainer.estimated_stepping_batches)
 
+    def label_to_levels(self,label, num_classes, dtype=torch.float32):
+        """Converts integer class label to extended binary label vector
+        Sebastian Raschka 2020-2021
+            coral_pytorch
+            Author: Sebastian Raschka <sebastianraschka.com>
+            License: MIT
+        Parameters
+        ----------
+        label : int
+            Class label to be converted into a extended
+            binary vector. Should be smaller than num_classes-1.
+
+        num_classes : int
+            The number of class clabels in the dataset. Assumes
+            class labels start at 0. Determines the size of the
+            output vector.
+
+        dtype : torch data type (default=torch.float32)
+            Data type of the torch output vector for the
+            extended binary labels.
+
+        Returns
+        ----------
+        levels : torch.tensor, shape=(num_classes-1,)
+            Extended binary label vector. Type is determined
+            by the `dtype` parameter.
+
+        Examples
+        ----------
+        # >>> label_to_levels(0, num_classes=5)
+        # tensor([0., 0., 0., 0.])
+        # >>> label_to_levels(1, num_classes=5)
+        # tensor([1., 0., 0., 0.])
+        # >>> label_to_levels(3, num_classes=5)
+        # tensor([1., 1., 1., 0.])
+        # >>> label_to_levels(4, num_classes=5)
+        # tensor([1., 1., 1., 1.])
+        """
+        if not label <= num_classes - 1:
+            raise ValueError('Class label must be smaller or '
+                             'equal to %d (num_classes-1). Got %d.'
+                             % (num_classes - 1, label))
+        if isinstance(label, torch.Tensor):
+            int_label = label.item()
+        else:
+            int_label = label
+
+        levels = [1] * int_label + [0] * (num_classes - 1 - int_label)
+        levels = torch.tensor(levels, dtype=dtype)
+        return levels
+
+    def levels_from_labelbatch(self,labels, num_classes, dtype=torch.float32):
+        """
+        Converts a list of integer class label to extended binary label vectors
+        Sebastian Raschka 2020-2021
+            coral_pytorch
+            Author: Sebastian Raschka <sebastianraschka.com>
+            License: MIT
+        Parameters
+        ----------
+        labels : list or 1D orch.tensor, shape=(num_labels,)
+            A list or 1D torch.tensor with integer class labels
+            to be converted into extended binary label vectors.
+
+        num_classes : int
+            The number of class clabels in the dataset. Assumes
+            class labels start at 0. Determines the size of the
+            output vector.
+
+        dtype : torch data type (default=torch.float32)
+            Data type of the torch output vector for the
+            extended binary labels.
+
+        Returns
+        ----------
+        levels : torch.tensor, shape=(num_labels, num_classes-1)
+
+        Examples
+        ----------
+        # >>> levels_from_labelbatch(labels=[2, 1, 4], num_classes=5)
+        tensor([[1., 1., 0., 0.],
+                [1., 0., 0., 0.],
+                [1., 1., 1., 1.]])
+        """
+        levels = []
+        for label in labels:
+            levels_from_label = self.label_to_levels(
+                label=label, num_classes=num_classes, dtype=dtype)
+            levels.append(levels_from_label)
+
+        levels = torch.stack(levels)
+        return levels
+
+    def coral_loss(self,logits, levels, importance_weights=None, reduction='mean'):
+        """Computes the CORAL loss described in
+        Sebastian Raschka 2020-2021
+            coral_pytorch
+            Author: Sebastian Raschka <sebastianraschka.com>
+            License: MIT
+        Cao, Mirjalili, and Raschka (2020)
+        *Rank Consistent Ordinal Regression for Neural Networks
+           with Application to Age Estimation*
+        Pattern Recognition Letters, https://doi.org/10.1016/j.patrec.2020.11.008
+
+        Parameters
+        ----------
+        logits : torch.tensor, shape(num_examples, num_classes-1)
+            Outputs of the CORAL layer.
+
+        levels : torch.tensor, shape(num_examples, num_classes-1)
+            True labels represented as extended binary vectors
+            (via `coral_pytorch.dataset.levels_from_labelbatch`).
+
+        importance_weights : torch.tensor, shape=(num_classes-1,) (default=None)
+            Optional weights for the different labels in levels.
+            A tensor of ones, i.e.,
+            `torch.ones(num_classes-1, dtype=torch.float32)`
+            will result in uniform weights that have the same effect as None.
+
+        reduction : str or None (default='mean')
+            If 'mean' or 'sum', returns the averaged or summed loss value across
+            all data points (rows) in logits. If None, returns a vector of
+            shape (num_examples,)
+
+        Returns
+        ----------
+            loss : torch.tensor
+            A torch.tensor containing a single loss value (if `reduction='mean'` or '`sum'`)
+            or a loss value for each data record (if `reduction=None`).
+
+        Examples
+        ----------
+        # >>> import torch
+        # >>> from coral_pytorch.losses import coral_loss
+        # >>> levels = torch.tensor(
+        # ...    [[1., 1., 0., 0.],
+        # ...     [1., 0., 0., 0.],
+        # ...    [1., 1., 1., 1.]])
+        # >>> logits = torch.tensor(
+        # ...    [[2.1, 1.8, -2.1, -1.8],
+        # ...     [1.9, -1., -1.5, -1.3],
+        # ...     [1.9, 1.8, 1.7, 1.6]])
+        # >>> coral_loss(logits, levels)
+        # tensor(0.6920)
+        """
+
+        if not logits.shape == levels.shape:
+            raise ValueError("Please ensure that logits (%s) has the same shape as levels (%s). "
+                             % (logits.shape, levels.shape))
+
+        term1 = (F.logsigmoid(logits) * levels
+                 + (F.logsigmoid(logits) - logits) * (1 - levels))
+
+        if importance_weights is not None:
+            term1 *= importance_weights
+
+        val = (-torch.sum(term1, dim=1))
+
+        if reduction == 'mean':
+            loss = torch.mean(val)
+        elif reduction == 'sum':
+            loss = torch.sum(val)
+        elif reduction is None:
+            loss = val
+        else:
+            s = ('Invalid value for `reduction`. Should be "mean", '
+                 '"sum", or None. Got %s' % reduction)
+            raise ValueError(s)
+
+        return loss
+
     def loss_corn(self,logits, y_train, num_classes, importance_weights=None):
         '''
-        code authored by Sebastian Raschka
-        https://github.com/Raschka-research-group/coral-pytorch/blob/main/coral_pytorch/losses.py
+        Sebastian Raschka 2020-2021
+            coral_pytorch
+            Author: Sebastian Raschka <sebastianraschka.com>
+            License: MIT
         :param logits:logits of bins
         :param y_train: true labels
         :param num_classes: number of classes
@@ -482,9 +640,12 @@ class DMSTask(pl.LightningModule):
 
         return losses / num_examples
 
-    def proba_from_logits(self, logits):
+    def _corn_proba_from_logits(self, logits):
         '''
-        code authored by Sebastian Raschka
+        Sebastian Raschka 2020-2021
+            coral_pytorch
+            Author: Sebastian Raschka <sebastianraschka.com>
+            License: MIT
         https://github.com/Raschka-research-group/coral-pytorch/blob/main/coral_pytorch/dataset.py
         :param logits:
         :return:
@@ -494,7 +655,37 @@ class DMSTask(pl.LightningModule):
         probas = torch.cumprod(probas, dim=1)
         return probas
 
-    def label_from_logits(self, logits):
+    def _coral_proba_from_logits(self,logits):
+        return torch.sigmoid(logits)
+
+    def _coral_label_from_logits(self,logits):
+        """
+        Converts predicted probabilities from extended binary format
+        to integer class labels
+
+        Sebastian Raschka 2020-2021
+            coral_pytorch
+            Author: Sebastian Raschka <sebastianraschka.com>
+            License: MIT
+        Parameters
+        ----------
+        probas : torch.tensor, shape(n_examples, n_labels)
+            Torch tensor consisting of probabilities returned by CORAL model.
+
+        Examples
+        ----------
+        # >>> # 3 training examples, 6 classes
+        # >>> probas = torch.tensor([[0.934, 0.861, 0.323, 0.492, 0.295],
+        # ...                        [0.496, 0.485, 0.267, 0.124, 0.058],
+        # ...                        [0.985, 0.967, 0.920, 0.819, 0.506]])
+        # >>> proba_to_label(probas)
+        tensor([2, 0, 5])
+        """
+        probas=self._coral_proba_from_logits(logits)
+        predict_levels = probas > 0.5
+        predicted_labels = torch.sum(predict_levels, dim=1)
+        return predicted_labels
+    def _corn_label_from_logits(self, logits):
         """
         code authored by Sebastian Raschka
         Converts logits to class labels.
@@ -508,8 +699,8 @@ class DMSTask(pl.LightningModule):
         return predicted_labels
 
     def _shared_step_corn_inference(self, outputs):
-        labels = self.label_from_logits(outputs)  # shape: (batch_size, 1) or (batch_size,)
-        probas = self.proba_from_logits(outputs)  # shape: (batch_size, num_classes)
+        labels = self._corn_label_from_logits(outputs)  # shape: (batch_size, 1) or (batch_size,)
+        probas = self._corn_proba_from_logits(outputs)  # shape: (batch_size, num_classes)
         # If labels is 1D, unsqueeze it to make it 2D for stacking
         if labels.dim() == 1:
             labels = labels.unsqueeze(1)  # shape: (batch_size, 1)
@@ -517,13 +708,53 @@ class DMSTask(pl.LightningModule):
         outputs = torch.cat([labels, probas], dim=1)  # shape: (batch_size, 1 + num_classes)
         return outputs
 
-    def _get_corn_outputs(self,outputs):
-        if self.corn_pred_feature == 'raw_predictions':
+    def _shared_step_coral_inference(self, outputs):
+        labels = self._coral_label_from_logits(outputs)  # shape: (batch_size, 1) or (batch_size,)
+        probas = self._coral_proba_from_logits(outputs)  # shape: (batch_size, num_classes)
+        # If labels is 1D, unsqueeze it to make it 2D for stacking
+        if labels.dim() == 1:
+            labels = labels.unsqueeze(1)  # shape: (batch_size, 1)
+        # Now horizontally stack them
+        outputs = torch.cat([labels, probas], dim=1)  # shape: (batch_size, 1 + num_classes)
+        return outputs
+
+    def _get_coral_corn_outputs(self,outputs):
+        if self.corn_coral_log_feature == 'raw_predictions':
             return outputs[:, 0]
         else:
             # if we want a probability input it's the bin that was input
             # with 1 indexing.
-            return outputs[:, int(self.corn_pred_feature)-1]
+            return outputs[:, int(self.corn_coral_log_feature)-1]
+    def weighted_mse_loss(self, outputs, labels, class_weights):
+        # weigthed MSE loss that weights by sample.
+
+        # Ensure outputs are flattened
+        outputs = outputs.view(-1)
+        labels = labels.view(-1)
+
+        # Debug: Print devices
+        # print(f"outputs device: {outputs.device}")
+        # print(f"labels device: {labels.device}")
+        # print(f"class_weights device: {class_weights.device}")
+
+        class_weights = class_weights.to(labels.device)
+
+        # print(f"class_weights device: {class_weights.device}")
+
+        # Get weights per sample based on class label
+        sample_weights = class_weights[labels.long()]
+        # print(f"sample_weights device: {sample_weights.device}")
+
+        # Compute element-wise squared error
+        mse_per_sample = (outputs - labels.float()) ** 2
+        # print(f"mse_per_sample device: {mse_per_sample.device}")
+
+        # Apply weights
+        weighted_mse = sample_weights * mse_per_sample
+        # print(f"weighted_mse device: {weighted_mse.device}")
+
+        # Return mean of weighted loss
+        return weighted_mse.mean()
 
 class SKTopNetTask(pl.LightningModule):
     @staticmethod

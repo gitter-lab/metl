@@ -949,7 +949,7 @@ class TransferModel(nn.Module):
         # top net args
         p.add_argument("--dropout_after_backbone", action="store_true")
         p.add_argument("--dropout_after_backbone_rate", type=float, default=0.1)
-        p.add_argument("--top_net_type", type=str, default="linear", choices=["linear", "nonlinear", "sklearn"])
+        p.add_argument("--top_net_type", type=str, default="linear", choices=["linear", "nonlinear", "sklearn","coral"])
         p.add_argument("--top_net_hidden_nodes", type=int, default=256)
         p.add_argument("--top_net_use_batchnorm", action="store_true")
         p.add_argument("--top_net_use_layernorm", action="store_true")
@@ -957,6 +957,7 @@ class TransferModel(nn.Module):
         p.add_argument("--top_net_use_dropout", action="store_true")
         p.add_argument("--top_net_dropout_rate", type=float, default=0.1)
         p.add_argument("--top_net_output_dim", type=float, default=1)
+        p.add_argument("--preinit_bias", help="For coral top_net_type only", action="store_true")
 
         return p
 
@@ -978,6 +979,7 @@ class TransferModel(nn.Module):
                  top_net_use_dropout: bool = False,
                  top_net_dropout_rate: float = 0.1,
                  top_net_output_dim: int = 1,
+                 preinit_bias:bool = False,
                  *args, **kwargs):
 
         super().__init__()
@@ -1074,6 +1076,10 @@ class TransferModel(nn.Module):
         if top_net_type == "linear":
             # linear layer for prediction
             layers["prediction"] = nn.Linear(in_features=pred_layer_input_features, out_features=int(top_net_output_dim))
+        elif top_net_type == "coral":
+            #todo: implement this base layer here. include number of covariate terms
+            layers["prediction"] =  CoralLayer( size_in=pred_layer_input_features,
+                                                preinit_bias=preinit_bias,**kwargs)
         elif top_net_type == "nonlinear":
             # fully connected with hidden layer
             fc_block = FCBlock(in_features=pred_layer_input_features,
@@ -1094,6 +1100,70 @@ class TransferModel(nn.Module):
 
     def forward(self, x, **kwargs):
         return self.model(x, **kwargs)
+
+class CoralLayer(torch.nn.Module):
+    """ Implements CORAL layer described in
+
+    Cao, Mirjalili, and Raschka (2020)
+    *Rank Consistent Ordinal Regression for Neural Networks
+       with Application to Age Estimation*
+    Pattern Recognition Letters, https://doi.org/10.1016/j.patrec.2020.11.008
+
+    Sebastian Raschka 2020-2021
+    coral_pytorch
+    Author: Sebastian Raschka <sebastianraschka.com>
+    License: MIT
+
+    Parameters
+    -----------
+    size_in : int
+        Number of input features for the inputs to the forward method, which
+        are expected to have shape=(num_examples, num_features).
+
+    num_classes : int
+        Number of classes in the dataset.
+
+    preinit_bias : bool (default=True)
+        If true, it will pre-initialize the biases to descending values in
+        [0, 1] range instead of initializing it to all zeros. This pre-
+        initialization scheme results in faster learning and better
+        generalization performance in practice.
+
+
+    """
+    def __init__(self, size_in, preinit_bias=True,**kwargs):
+        super().__init__()
+        self.size_in, self.size_out = size_in, 1
+
+        self.num_classes =  int(kwargs['num_classes'])
+        self.aux_input_num = int(kwargs['aux_input_num'])
+
+
+
+        self.coral_weights = torch.nn.Linear(self.size_in, 1, bias=False)
+        if preinit_bias:
+            self.coral_bias = torch.nn.Parameter(
+                torch.arange(self.num_classes - 1, 0, -1).float() / (self.num_classes-1),requires_grad=True)
+        else:
+            self.coral_bias = torch.nn.Parameter(
+                torch.zeros(self.num_classes-1).float(),requires_grad=True)
+
+    def forward(self, x,**kwargs):
+        """
+        Computes forward pass.
+
+        Parameters
+        -----------
+        x : torch.tensor, shape=(num_examples, num_features)
+            Input features.
+
+        Returns
+        -----------
+        logits : torch.tensor, shape=(num_examples, num_classes-1)
+        """
+        aux = kwargs.get("aux", {})
+
+        return self.coral_weights(x) + self.coral_bias
 
 
 def get_activation_fn(activation, functional=True):

@@ -42,7 +42,7 @@ def parse_raw_preds_and_save(raw_preds, dm, log_dir, args,suffix=''):
     :return: prediction_d ; a prediction dictionary
     '''
 
-    if args.loss_func == 'corn':
+    if args.loss_func == 'corn' or args.loss_func=='coral':
         # parse raw_preds if we are dealing with a case of corn loss function
         # we want to save all probabilities along with raw predictions
         # input --corn_pred_feature determined what is used for logging plots
@@ -77,9 +77,9 @@ def parse_raw_preds_and_save(raw_preds, dm, log_dir, args,suffix=''):
         _ = save_predictions(save_raw_preds, dm, log_dir, save_format="npy",suffix=suffix)
 
         if suffix!='':
-            suffix=f"{suffix}_corn_pred_feature"
+            suffix=f"{suffix}_corn_coral_log_feature"
         else:
-            suffix='_corn_pred_feature'
+            suffix='_corn_coral_log_feature'
         predictions_d = save_predictions(log_raw_preds, dm, log_dir, save_format="npy",
                                                         suffix=suffix)
 

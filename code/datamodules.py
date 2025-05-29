@@ -71,6 +71,9 @@ class DMSDataModule(pl.LightningDataModule):
                                  " Valid formats are 'tensor', 'numpy', and 'string'. If not specified, all numerical aux inputs"
                                  " will be converted to tensors, and all string aux inputs will be left as strings.",
                             type=str, default="")
+        parser.add_argument("--aux_input_num",
+                            help="number of auxiliary inputs",
+                            type=int,default=1)
         parser.add_argument("--split_dir",
                             help="the directory containing the train/tune/test split",
                             type=str, default=None)
