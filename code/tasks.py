@@ -572,7 +572,7 @@ class DMSTask(pl.LightningModule):
         # tensor(0.6920)
         """
 
-        importance_weights = importance_weights.to(logits.device)
+
 
         if not logits.shape == levels.shape:
             raise ValueError("Please ensure that logits (%s) has the same shape as levels (%s). "
@@ -582,6 +582,7 @@ class DMSTask(pl.LightningModule):
                  + (F.logsigmoid(logits) - logits) * (1 - levels))
 
         if importance_weights is not None:
+            importance_weights = importance_weights.to(logits.device)
             term1 *= importance_weights
 
         val = (-torch.sum(term1, dim=1))
