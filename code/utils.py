@@ -1,5 +1,6 @@
 """ general utility functions used throughput codebase """
 import os
+import warnings
 from os.path import isfile, isdir, join
 from typing import Optional, Union
 from io import StringIO
@@ -123,7 +124,10 @@ def load_dataset(ds_name: Optional[str] = None,
     if not isfile(ds_fn):
         raise FileNotFoundError("can't load dataset, file doesn't exist: {}".format(ds_fn))
 
-    ds = pd.read_csv(ds_fn, sep="\t")
+    if ds_fn.endswith('.csv'):
+        ds = pd.read_csv(ds_fn)
+    else:
+        ds = pd.read_csv(ds_fn, sep="\t")
 
     # ensure variants are in sorted order
     if sort_mutations and "variant" in ds:
@@ -289,7 +293,8 @@ def get_rosetta_energy_targets(target_group: str = "standard-all",
         if all([tg in base_targets for tg in target_names]):
             return list(target_names)
         else:
-            raise ValueError("some target_names not found in master list")
+            warnings.warn("Some target_names not found in Default base targets, please proceed with caution", category=UserWarning)
+            return list(target_names)
     else:
         raise ValueError("target_names should be a list: {}".format(target_names))
 
