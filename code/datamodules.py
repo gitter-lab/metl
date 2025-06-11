@@ -73,7 +73,7 @@ class DMSDataModule(pl.LightningDataModule):
                             type=str, default="")
         parser.add_argument("--aux_input_num",
                             help="number of auxiliary inputs",
-                            type=int,default=1)
+                            type=int,nargs="+",default=[0])
         parser.add_argument("--split_dir",
                             help="the directory containing the train/tune/test split",
                             type=str, default=None)

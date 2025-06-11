@@ -315,9 +315,9 @@ class DMSTask(pl.LightningModule):
         pdb_fn = data_batch["pdb_fns"][0] if "pdb_fns" in data_batch else None
 
         # auxiliary inputs for the model
-        # if they are not provided, we just pass in an empty dictionary
-        aux = data_batch.get("aux", {})
-
+        # if they are not provided
+        # we just pass in an empty dictionary
+        aux = {'aux':data_batch.get("aux", {})}
         outputs = self(inputs, pdb_fn=pdb_fn, **aux)
         if compute_loss:
             if self.loss_func == "mse":
