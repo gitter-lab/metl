@@ -2,7 +2,7 @@ name: metl
 channels:
   - conda-forge
 dependencies:
-  - python=3.9.13
+  - python=3.9.17
   - pytorch::pytorch=1.12.1
   - pytorch-lightning=1.7.7
   - torchmetrics=0.10.2
