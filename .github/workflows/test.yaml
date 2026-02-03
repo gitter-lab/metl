@@ -2,6 +2,7 @@ name: Tests
 on:
 - push
 - pull_request
+- workflow_dispatch
 
 jobs:
   # Installs the conda environment and trains METL
