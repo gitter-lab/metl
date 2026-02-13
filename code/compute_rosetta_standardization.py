@@ -19,12 +19,24 @@ logger.setLevel(logging.DEBUG)
 
 def save_standardize_params(ds_fn: str,
                             split_dir: Optional[str] = None,
-                            energies_start_col: str = "total_score"):
+                            energies_start_col: str = "total_score",
+                            columns2ignore:Optional[list[str]]=None):
     """ save the means and standard deviations of all rosetta energies in dataset.
         if there are multiple different PDBs, such as in the global rosetta dataset,
         then the means and standard deviations are computed for each PDB separately """
 
     ds = cast(pd.DataFrame, pd.read_hdf(ds_fn, key="variant"))
+
+    print('ds columns')
+    print(ds.columns)
+    # Drop user-specified columns if they exist
+    if columns2ignore is None:
+        pass
+    else:
+        ds = ds.drop(columns=[col for col in columns2ignore if col in ds.columns])
+    print('ds columns')
+    print(ds.columns)
+
 
     # default output directory for full-dataset standardization params
     out_dir = join(dirname(ds_fn), "standardization_params")
@@ -50,7 +62,6 @@ def save_standardize_params(ds_fn: str,
 
     # standardization parameters are computed per-pdb
     g = ds.groupby("pdb_fn")
-
     g_mean = g.mean(numeric_only=True)
     g_mean = g_mean.iloc[:, list(g_mean.columns).index(energies_start_col):]
 
@@ -69,11 +80,13 @@ def save_standardize_params(ds_fn: str,
 
 
 def main(args):
-    save_standardize_params(args.ds_fn_h5, args.split_dir, args.energies_start_col)
+    save_standardize_params(args.ds_fn_h5, args.split_dir, args.energies_start_col,args.columns2ignore)
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(fromfile_prefix_chars="@")
+
+
     parser.add_argument("ds_fn_h5",
                         help="path to the rosetta dataset in hdf5 format",
                         type=str)
@@ -89,6 +102,15 @@ if __name__ == "__main__":
                              "this is used to determine which columns in the dataset are energy terms. "
                              "leave this as default unless for some reason total_score is not the first energy term.",
                         type=str,
+                        default="total_score",
+                        required=False)
+
+    parser.add_argument("--columns2ignore",
+                        help="if their is not clear indication of which energy term comes first (such as when"
+                        "combining energy terms from mutliple Rosetta energy functions) use this parameter to"
+                             " define columns which must be ignored",
+                        type=str,
+                        nargs='+',
                         default="total_score",
                         required=False)
 

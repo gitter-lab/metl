@@ -41,7 +41,8 @@ def gen_dataset_from_query(ds_name: str,
                            ct_fn: str = "data/rosetta_data/create_tables.sql",
                            save_csv: bool = True,
                            save_sql: bool = True,
-                           save_hdf_fixed: bool = True):
+                           save_hdf_fixed: bool = True,
+                           int_cols: Optional[list[str]]=None):
 
     """ generate a rosetta dataset by querying the main variant database from rosettafy """
 
@@ -153,12 +154,13 @@ def gen_dataset_from_query(ds_name: str,
     # convert int columns to regular non-nullable int
     # not sure if this problem is coming from connectorx or new version of pandas
     # either way, Int64 (nullable) causes problems when saving to hdf5, whereas int64(non-nullable) doesnt
-    int_cols = ["run_time",
-                "mutate_run_time",
-                "relax_run_time",
-                "filter_run_time",
-                "centroid_run_time",
-                "dock_run_time"]
+    if int_cols is None:
+        int_cols = ["run_time",
+                    "mutate_run_time",
+                    "relax_run_time",
+                    "filter_run_time",
+                    "centroid_run_time",
+                    "dock_run_time"]
 
     for int_col in int_cols:
         if int_col in db.columns:
@@ -460,7 +462,8 @@ def main(args):
                                outlier_energy_term=args.outlier_energy_term,
                                outlier_threshold=args.outlier_threshold,
                                replace_pdb_fn=args.replace_pdb_fn,
-                               ct_fn=args.ct_fn)
+                               ct_fn=args.ct_fn,
+                               int_cols=args.int_cols)
 
     elif args.mode == "generate_dms_coverage_dataset":
         gen_dataset_dms_cov(ds_name=args.ds_name, db_fn=args.db_fn)
@@ -495,7 +498,7 @@ if __name__ == "__main__":
                         type=str)
 
     parser.add_argument("--db_fn",
-                        help="path to the variant database created in rosettafy",
+                        help="path to the variant database created in metl-sim",
                         type=str)
 
     parser.add_argument("--keep_num_muts",
@@ -537,5 +540,10 @@ if __name__ == "__main__":
                         help="path to the SQL create tables file",
                         type=str,
                         default="data/rosetta_data/create_tables.sql")
+
+    parser.add_argument("--int_cols",
+                        help="nullable columns (hd5 error) defined by user",
+                        nargs='+',
+                        default=None)
 
     main(parser.parse_args())

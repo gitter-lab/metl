@@ -32,6 +32,63 @@ except ImportError:
     import datamodules
     from metrics import compute_metrics
 
+def parse_raw_preds_and_save(raw_preds, dm, log_dir, args,suffix=''):
+    '''
+    this function will parse the raw predictions from
+    :param args:
+    :param raw_preds:
+    :param dm:
+    :param log_dir:
+    :return: prediction_d ; a prediction dictionary
+    '''
+
+    if args.loss_func == 'corn' or args.loss_func=='coral':
+        # parse raw_preds if we are dealing with a case of corn loss function
+        # we want to save all probabilities along with raw predictions
+        # input --corn_pred_feature determined what is used for logging plots
+
+        if isinstance(raw_preds[0][0], torch.Tensor):
+            # if we are dealing with the 'full' dataset then
+            # we need to parse raw_preds differently
+            log_raw_preds = []
+            save_raw_preds = []
+            for rp in raw_preds:
+                log_raw_preds.append(rp[0])
+                save_raw_preds.append(rp[1])
+            assert torch.all(log_raw_preds[0] == raw_preds[0][0])
+            assert torch.all(raw_preds[0][1] == save_raw_preds[0])
+        else:
+            # we are dealing with the normal
+            # case with train , test, val
+            log_raw_preds = []
+            save_raw_preds = []
+            for rp in raw_preds:
+                rp_set = []
+                rp_set_save = []
+                for rpb in rp:
+                    rp_set.append(rpb[0])
+                    rp_set_save.append(rpb[1])
+                log_raw_preds.append(rp_set)
+                save_raw_preds.append(rp_set_save)
+
+            assert torch.all(log_raw_preds[0][0] == raw_preds[0][0][0])
+            assert torch.all(raw_preds[0][0][1] == save_raw_preds[0][0])
+
+        _ = save_predictions(save_raw_preds, dm, log_dir, save_format="npy",suffix=suffix)
+
+        if suffix!='':
+            suffix=f"{suffix}_corn_coral_log_feature"
+        else:
+            suffix='_corn_coral_log_feature'
+        predictions_d = save_predictions(log_raw_preds, dm, log_dir, save_format="npy",
+                                                        suffix=suffix)
+
+    else:
+        # standard save
+        predictions_d = save_predictions(raw_preds, dm, log_dir, save_format="npy",
+                                         suffix=suffix)
+
+    return predictions_d
 
 def save_scatterplots(dm, predictions_d, log_dir, suffix=""):
 

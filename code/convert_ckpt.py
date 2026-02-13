@@ -13,7 +13,6 @@ import torch
 import torch.nn as nn
 import torchinfo
 
-
 try:
     from . import models
     from . import utils

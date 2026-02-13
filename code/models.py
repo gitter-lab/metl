@@ -20,6 +20,7 @@ except ImportError:
     import relative_attention as ra
     import tasks
 
+
 def reset_parameters_helper(m: nn.Module):
     """ helper function for resetting model parameters, meant to be used with model.apply() """
 
@@ -949,13 +950,16 @@ class TransferModel(nn.Module):
         # top net args
         p.add_argument("--dropout_after_backbone", action="store_true")
         p.add_argument("--dropout_after_backbone_rate", type=float, default=0.1)
-        p.add_argument("--top_net_type", type=str, default="linear", choices=["linear", "nonlinear", "sklearn"])
+        p.add_argument("--top_net_type", type=str, default="linear",
+                       choices=["linear", "nonlinear", "sklearn", "coral"])
         p.add_argument("--top_net_hidden_nodes", type=int, default=256)
         p.add_argument("--top_net_use_batchnorm", action="store_true")
         p.add_argument("--top_net_use_layernorm", action="store_true")
         p.add_argument("--top_net_norm_before_activation", action="store_true")
         p.add_argument("--top_net_use_dropout", action="store_true")
         p.add_argument("--top_net_dropout_rate", type=float, default=0.1)
+        p.add_argument("--top_net_output_dim", type=float, default=1)
+        p.add_argument("--preinit_bias", help="For coral top_net_type only", action="store_true")
 
         return p
 
@@ -976,6 +980,8 @@ class TransferModel(nn.Module):
                  top_net_norm_before_activation: bool = False,
                  top_net_use_dropout: bool = False,
                  top_net_dropout_rate: float = 0.1,
+                 top_net_output_dim: int = 1,
+                 preinit_bias: bool = False,
                  *args, **kwargs):
 
         super().__init__()
@@ -1071,7 +1077,12 @@ class TransferModel(nn.Module):
         # create a new prediction layer on top of the backbone
         if top_net_type == "linear":
             # linear layer for prediction
-            layers["prediction"] = nn.Linear(in_features=pred_layer_input_features, out_features=1)
+            layers["prediction"] = nn.Linear(in_features=pred_layer_input_features,
+                                             out_features=int(top_net_output_dim))
+        elif top_net_type == "coral":
+            # todo: implement this base layer here. include number of covariate terms
+            layers["prediction"] = CoralLayer(size_in=pred_layer_input_features,
+                                              preinit_bias=preinit_bias, **kwargs)
         elif top_net_type == "nonlinear":
             # fully connected with hidden layer
             fc_block = FCBlock(in_features=pred_layer_input_features,
@@ -1082,7 +1093,7 @@ class TransferModel(nn.Module):
                                use_dropout=top_net_use_dropout,
                                dropout_rate=top_net_dropout_rate)
 
-            pred_layer = nn.Linear(in_features=top_net_hidden_nodes, out_features=1)
+            pred_layer = nn.Linear(in_features=pred_layer_input_features, out_features=int(top_net_output_dim))
 
             layers["prediction"] = SequentialWithArgs(fc_block, pred_layer)
         else:
@@ -1092,6 +1103,107 @@ class TransferModel(nn.Module):
 
     def forward(self, x, **kwargs):
         return self.model(x, **kwargs)
+
+
+class CoralLayer(torch.nn.Module):
+    """ Implements CORAL layer described in
+
+    Cao, Mirjalili, and Raschka (2020)
+    *Rank Consistent Ordinal Regression for Neural Networks
+       with Application to Age Estimation*
+    Pattern Recognition Letters, https://doi.org/10.1016/j.patrec.2020.11.008
+
+    Sebastian Raschka 2020-2021
+    coral_pytorch
+    Author: Sebastian Raschka <sebastianraschka.com>
+    License: MIT
+
+    Parameters
+    -----------
+    size_in : int
+        Number of input features for the inputs to the forward method, which
+        are expected to have shape=(num_examples, num_features).
+
+    num_classes : int
+        Number of classes in the dataset.
+
+    preinit_bias : bool (default=True)
+        If true, it will pre-initialize the biases to descending values in
+        [0, 1] range instead of initializing it to all zeros. This pre-
+        initialization scheme results in faster learning and better
+        generalization performance in practice.
+
+
+    """
+
+    def __init__(self, size_in, preinit_bias=True, **kwargs):
+        super().__init__()
+        self.size_in, self.size_out = size_in, 1
+
+        self.num_classes = int(kwargs['num_classes'])
+
+        self.aux_input_names = kwargs.get('aux_input_names', None)
+        self.aux_input_num = kwargs.get('aux_input_num', [0])
+        if self.aux_input_num == [0]:
+            self.aux_input_num = [1]
+
+        self.coral_weights = torch.nn.Linear(self.size_in, 1, bias=False)
+
+        if preinit_bias:
+            self.coral_bias = torch.nn.Parameter(
+                (torch.arange(self.num_classes - 1, 0, -1).float()
+                 / (self.num_classes - 1)
+                 ).view(-1, *[1] * len(self.aux_input_num))
+                .repeat(1, *self.aux_input_num),
+                requires_grad=True)
+        else:
+            self.coral_bias = torch.nn.Parameter(
+                torch.zeros(self.num_classes - 1, *self.aux_input_num).float(), requires_grad=True)
+
+    def forward(self, x, **kwargs):
+        """
+        Computes forward pass.
+
+        Parameters
+        -----------
+        x : torch.tensor, shape=(num_examples, num_features)
+            Input features.
+
+        Returns
+        -----------
+        logits : torch.tensor, shape=(num_examples, num_classes-1)
+        """
+        aux = kwargs.get("aux", {})
+
+        # convert aux to tensor
+        if len(self.aux_input_num) == 1 and self.aux_input_num[0] == 1:
+            # there are no aux terms
+            b = self.coral_bias.squeeze()
+        else:
+            b = self.extract_from_tensor(self.coral_bias, aux, self.aux_input_names)
+        return self.coral_weights(x) + b
+
+    def extract_from_tensor(self, data, aux, aux_input_names):
+        """
+        Extracts (num_classes-1,) vectors from a tensor of shape (num_classes, D1, D2, ..., Dn)
+        using N sets of indices specified in `aux` dictionary.
+
+        Parameters:
+            data (Tensor): Tensor of shape (num_classes-1, D1, D2, ..., Dn), with requires_grad=True allowed.
+            aux (dict): Dictionary with keys corresponding to indexing dimensions.
+                        Each value must be a 1D tensor of length N.
+            aux_input_names (list): List of keys to use from aux, defining the order of dimensions.
+
+        Returns:
+            Tensor of shape (N, num_classes-1), where each row is a (num_classes-1,) slice from data.
+        """
+
+        # Step 1: Extract and cast index tensors to torch.long
+        idx_tensors = [aux[k].long() for k in aux_input_names]  # list of (N,) tensors
+
+        # Step 2: Use advanced indexing: data[:, idx1, idx2, ..., idxn]
+        out = data[(slice(None), *idx_tensors)]  # shape: (num_classes, N)
+        return out.T  # shape: (N,num_classes)
 
 
 def get_activation_fn(activation, functional=True):

@@ -91,6 +91,12 @@ See the help message for an explanation of all the arguments
 python code/code/train_target_model.py --help
 ```
 
+Depending on the type of your experimental data, you may want to consider changing your loss function during finetuning.
+Besides the standard mean square error loss, you can change to an ordinal specific loss (for example, for datasets with class labels 0,1,..,N-1) and use importance weighting for datasets with a class imbalance for ordinal data only.
+For more details on the specific arguments and functionality please look to the `Loss Arguments` section of [finetuning.ipynb](notebooks/finetuning.ipynb).
+The ordinal specific loss functions in metl were adapted from the CORN+CORAL library, [link](https://github.com/Raschka-research-group/coral-pytorch/tree/main).
+
+
 # Running inference
 
 See the notebook [inference.ipynb](notebooks/inference.ipynb) for examples of how to run inference with METL models trained in this repository.
